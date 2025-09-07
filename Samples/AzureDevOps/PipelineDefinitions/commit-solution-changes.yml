@@ -31,6 +31,6 @@ stages:
       steps:
       - template: ../Templates/commit-solution-template.yml
         parameters:
-              SolutionName: ${{ parameters.SolutionName }}
-              CommitMessage: ${{ parameters.CommitMessage }}
+          SolutionName: ${{ parameters.SolutionName }}
+          CommitMessage: ${{ parameters.CommitMessage }}
           

@@ -38,7 +38,9 @@ resources:
 
 stages:
   - stage: deployToTEST
-    displayName: Deploy to TEST
+    condition: eq(variables['Build.SourceBranchName'], 'main')
+    dependsOn: []
+    displayName: Deploy to TEST (main)
     jobs:
     - deployment: deployToTEST
       variables:
@@ -57,9 +59,10 @@ stages:
               OverwriteUnmanagedCustomisations: ${{ parameters.OverwriteUnmanagedCustomisations }}
               SkipLowerVersion: ${{ parameters.SkipLowerVersion }}
              
-  - stage: deployToPROD
+  - stage: deployToPRODMain
+    condition: eq(and(variables['Build.SourceBranchName'], 'main'), succeeded('deployToTEST'))
     dependsOn: deployToTEST
-    displayName: Deploy to PROD
+    displayName: Deploy to PROD (main)
     jobs:
     - deployment: deployToPROD
       variables:
@@ -77,3 +80,68 @@ stages:
               SolutionName: ${{ parameters.SolutionName }}
               OverwriteUnmanagedCustomisations: ${{ parameters.OverwriteUnmanagedCustomisations }}
               SkipLowerVersion: ${{ parameters.SkipLowerVersion }}
+    - deployment: deployToHFXDEV
+      variables:
+        - group: HFXDEV Environment Variables # This Variable Group will need creating in your Azure DevOps Project under Pipelines > Library. Remember also to grant the pipelines access to the Variable Groups and link them together
+      pool:
+        vmImage: 'windows-latest'
+      displayName: "Deploy to HFXDEV"
+      environment: 'HFXDEV'
+      strategy:
+       runOnce:
+         deploy:
+          steps:
+          - template: ../Templates/prepare-hotfix-env-template.yml
+            parameters:
+              SolutionName: ${{ parameters.SolutionName }}
+    - job: resetHotfixBranch
+      pool:
+        vmImage: 'windows-latest'
+      displayName: 'Reset Hotfix Branch'
+      steps:
+      - template: ../Templates/reset-hotfix-branch-template.yml
+
+  - stage: deployToHFXTEST
+    condition: eq(variables['Build.SourceBranchName'], 'hotfix')
+    dependsOn: []
+    displayName: Deploy to HFXTEST (hotfix)
+    jobs:
+    - deployment: deployToHFXTEST
+      variables:
+        - group: HFXTEST Environment Variables # This Variable Group will need creating in your Azure DevOps Project under Pipelines > Library. Remember also to grant the pipelines access to the Variable Groups and link them together
+      pool:
+        vmImage: 'windows-latest'
+      displayName: "Deploy to HFXTEST"
+      environment: 'HFXTEST'
+      strategy:
+       runOnce:
+         deploy:
+          steps:
+          - template: ../Templates/deploy-solution-template.yml
+            parameters:
+              SolutionName: ${{ parameters.SolutionName }}
+              OverwriteUnmanagedCustomisations: ${{ parameters.OverwriteUnmanagedCustomisations }}
+              SkipLowerVersion: ${{ parameters.SkipLowerVersion }}
+             
+  - stage: deployToPRODHotfix
+    condition: eq(and(variables['Build.SourceBranchName'], 'hotfix'), succeeded('deployToHFXTEST'))
+    dependsOn: deployToHFXTEST
+    displayName: Deploy to PROD (hotfix)
+    jobs:
+    - deployment: deployToPROD
+      variables:
+        - group: PROD Environment Variables # This Variable Group will need creating in your Azure DevOps Project under Pipelines > Library. Remember also to grant the pipelines access to the Variable Groups and link them together
+      pool:
+        vmImage: 'windows-latest'
+      displayName: "Deploy to PROD"
+      environment: 'PROD'
+      strategy:
+       runOnce:
+         deploy:
+          steps:
+          - template: ../Templates/deploy-solution-template.yml
+            parameters:
+              SolutionName: ${{ parameters.SolutionName }}
+              OverwriteUnmanagedCustomisations: ${{ parameters.OverwriteUnmanagedCustomisations }}
+              SkipLowerVersion: ${{ parameters.SkipLowerVersion }}
+    

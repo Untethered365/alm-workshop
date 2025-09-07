@@ -1,0 +1,123 @@
+parameters:
+  - name: SolutionName
+    type: string
+
+steps:
+  # Install the Power Platform Tools on the agent
+  - task: PowerPlatformToolInstaller@2
+    name: installPowerPlatformTools
+    displayName: Install Power Platform Tools
+    inputs:
+      DefaultVersion: false
+      AddToolsToPath: true
+
+  # Pick up the connection details from the Service Connection for later use
+  - task: PowerPlatformSetConnectionVariables@2
+    inputs:
+      authenticationType: 'PowerPlatformSPN'
+      PowerPlatformSPN: '$(SPNServiceConnection)' 
+    name: setConnectionVariablesSP
+    displayName: Set Connection Variables for SP
+
+  # Sometimes username/password authentication might be required for things that don't support Service Principal authentication.
+  # So we have a seperate Service Connection pointing to the same DEV environment but using username/pasword authentication.
+  # Pick up the connection details from such a Service Connection for later use
+  - task: PowerPlatformSetConnectionVariables@2
+    inputs:
+      authenticationType: 'PowerPlatformEnvironment'
+      PowerPlatformEnvironment: '$(UsernamePasswordServiceConnection)'
+      ApplicationId: '$(ApplicationId)' 
+      RedirectUri: '$(RedirectUri)'
+    name: setConnectionVariables
+    displayName: Set Connection Variables 
+
+  # Reset the environment to a clean state
+  - task: PowerPlatformResetEnvironment@2
+    inputs:
+      authenticationType: 'PowerPlatformEnvironment'
+      PowerPlatformEnvironment: '$(UsernamePasswordServiceConnection)'
+      Environment: '$(BuildTools.EnvironmentUrl)'
+      OverrideDomainName: true
+      DomainName: 'ppphfxdev'
+      OverrideFriendlyName: true
+      FriendlyName: 'PPP-HFXDEV'
+      CurrencyName: 'GBP'
+      WaitForCompletion: true
+      MaxWaitTime: '60'
+    name: resetEnvironment
+    displayName: Reset Environment
+
+  # Add Deployment Service Account User to the environment
+  - task: PowerPlatformAssignUser@2
+    inputs:
+      authenticationType: 'PowerPlatformEnvironment'
+      PowerPlatformEnvironment: '$(UsernamePasswordServiceConnection)'
+      Environment: '$(BuildTools.EnvironmentUrl)'
+      User: '$(setConnectionVariables.BuildTools.UserName)'
+      Role: 'System Administrator'
+    name: addDeploymentServiceAccountToEnvironment
+    displayName: Add Deployment Service Account to Environment  
+
+  # Add Service Principal User to the environment
+  - task: PowerPlatformAssignUser@2
+    inputs:
+      authenticationType: 'PowerPlatformEnvironment'
+      PowerPlatformEnvironment: '$(UsernamePasswordServiceConnection)'
+      Environment: '$(BuildTools.EnvironmentUrl)'
+      User: '$(setConnectionVariablesSP.BuildTools.ApplicationId)'
+      Role: 'System Administrator'
+      ApplicationUser: true
+    name: addServicePrincipalAccountToEnvironment
+    displayName: Add Service Principal Account to Environment
+
+  # Create Dataverse connection - if your solution uses any other Connector you will also need to create a Connection for each Connector used
+  - pwsh: |
+      pac auth create --environment '$(BuildTools.EnvironmentUrl)' --username '$(setConnectionVariables.BuildTools.UserName)' --password '$(setConnectionVariables.BuildTools.Password)' --name 'PACAuthProfileServiceAccount'
+      pac auth select --name 'PACAuthProfileServiceAccount'
+      pac org select --environment '$(BuildTools.EnvironmentUrl)'
+      pac connection create --application-id '$(setConnectionVariablesSP.BuildTools.ApplicationId)' --client-secret '$(setConnectionVariablesSP.BuildTools.ClientSecret)' --name 'DataverseConnectionServiceAccount' --tenant-id '$(TenantId)'
+    name: createDataverseConnectionForServiceAccount
+    displayName: Create Dataverse Connection for Service Account
+
+  # Create Dataverse connection - if your solution uses any other Connector you will also need to create a Connection for each Connector used
+  - pwsh: |
+      pac auth create --environment '$(BuildTools.EnvironmentUrl)' --applicationId '$(setConnectionVariablesSP.BuildTools.ApplicationId)' --clientSecret '$(setConnectionVariablesSP.BuildTools.ClientSecret)' --tenant '$(TenantId)' --name 'PACAuthProfileSP'
+      pac auth select --name 'PACAuthProfileSP'
+      pac org select --environment '$(BuildTools.EnvironmentUrl)'
+      pac connection create --application-id '$(setConnectionVariablesSP.BuildTools.ApplicationId)' --client-secret '$(setConnectionVariablesSP.BuildTools.ClientSecret)' --name 'DataverseConnectionSP' --tenant-id '$(TenantId)'
+    name: createDataverseConnectionForServicePrincipal
+    displayName: Create Dataverse Connection for Service Principal
+
+  # Check if the intended solution is already instead, and if so, what version    
+  - pwsh: "$(Pipeline.Workspace)/CI-Build/Scripts/IsSolutionInstalled.ps1 -serverURL '$(BuildTools.EnvironmentUrl)' -clientId '$(setConnectionVariablesSP.BuildTools.ApplicationId)' -clientSecret '$(setConnectionVariablesSP.BuildTools.ClientSecret)'  -solutionUniqueName '${{ parameters.SolutionName }}' -solutionFilePath '$(Pipeline.Workspace)/CI-Build/Solutions/${{ parameters.SolutionName }}_managed.zip'"
+    name: checkSolutionCurrentInstallationStatus
+    displayName: Check Solution Installation Status for Solution ${{ parameters.SolutionName }} 
+  
+  # Transform Deployment Settings file
+  - pwsh: "$(Pipeline.Workspace)/CI-Build/Scripts/TransformDeploymentSettingsFile.ps1 -settingsFilePath '$(Pipeline.Workspace)/CI-Build/Settings/${{ parameters.SolutionName }}.json' -environmentVariablesValues '$(EnvironmentVariableValues)' -connectionTokens '$(ConnectionReferenceTokens)' -environmentId '$(EnvironmentID)' -username $(setConnectionVariables.BuildTools.UserName) -password $(setConnectionVariables.BuildTools.Password)"
+    name: transformDeploymentSettingsFile
+    displayName: Transform Deployment Settings File for Solution ${{ parameters.SolutionName }}
+
+  # Import the unmanaged solution
+  - task: PowerPlatformImportSolution@2
+    inputs:
+      authenticationType: 'PowerPlatformEnvironment'
+      PowerPlatformEnvironment: '$(UsernamePasswordServiceConnection)'
+      SolutionInputFile: '$(Pipeline.Workspace)/CI-Build/Solutions/${{ parameters.SolutionName }}.zip'
+      UseDeploymentSettingsFile: true
+      DeploymentSettingsFile: '$(Pipeline.Workspace)/CI-Build/Settings/${{ parameters.SolutionName }}.json'
+      AsyncOperation: true
+      MaxAsyncWaitTime: '60'
+      PublishWorkflows: true
+    name: importUnmanagedSolution
+    displayName: Import Solution ${{ parameters.SolutionName }} as unmanaged
+
+  # Publish all customisations in the source environment to ensure everything is up to date
+  - task: PowerPlatformPublishCustomizations@2
+    inputs:
+      authenticationType: 'PowerPlatformSPN'
+      PowerPlatformSPN: '$(SPNServiceConnection)'
+      AsyncOperation: true
+      MaxAsyncWaitTime: '60'
+    name: publishAllCustomisations
+    displayName: Publish All Customisations

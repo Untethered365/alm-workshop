@@ -1,0 +1,35 @@
+steps:  
+  # Checkout the repository
+  - checkout: self
+    persistCredentials: true
+
+  # Set the Git configuration to handle long paths and ensure the correct user details are set    
+  - task: CmdLine@2
+    inputs:
+      script: |
+        git config --global core.longpaths true
+        git config --global user.email "$(Build.RequestedForEmail)"
+        git config --global user.name "$(Build.RequestedFor)"
+        git -c http.extraheader="AUTHORIZATION: bearer $(System.AccessToken)" fetch
+    name: setGitConfig
+    displayName: Set Git Config    
+
+  # Reset hotfix brance:
+  - pwsh: |
+      # Fetch all branches and history to ensure we have the complete repository
+      git -c http.extraheader="AUTHORIZATION: bearer $(System.AccessToken)" fetch --all --unshallow
+
+      # Delete local hotfix branch if it exists (ignore errors if it doesn't)
+      git branch -D hotfix 2>$null || Write-Host "No local hotfix branch to delete"
+
+      # Delete remote hotfix branch if it exists (ignore errors if it doesn't)
+      git -c http.extraheader="AUTHORIZATION: bearer $(System.AccessToken)" push origin --delete hotfix 2>$null || Write-Host "No remote hotfix branch to delete"
+
+      # Create new hotfix branch from specified commit
+      git -c http.extraheader="AUTHORIZATION: bearer $(System.AccessToken)" checkout -b hotfix $(resources.pipeline.CI-Build.sourceCommit) || exit 1
+
+      # Push the new hotfix branch to remote
+      git -c http.extraheader="AUTHORIZATION: bearer $(System.AccessToken)" push -f origin hotfix
+      
+    name: resetHotfixBranch
+    displayName: Reset Hotfix Branch      
