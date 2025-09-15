@@ -37,10 +37,6 @@ steps:
       authenticationType: 'PowerPlatformEnvironment'
       PowerPlatformEnvironment: '$(UsernamePasswordServiceConnection)'
       Environment: '$(BuildTools.EnvironmentUrl)'
-      OverrideDomainName: true
-      DomainName: 'ppphfxdev'
-      OverrideFriendlyName: true
-      FriendlyName: 'PPP-HFXDEV'
       CurrencyName: 'GBP'
       WaitForCompletion: true
       MaxWaitTime: '60'
