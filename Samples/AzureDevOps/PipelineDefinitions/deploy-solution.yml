@@ -27,7 +27,9 @@ parameters:
     default: true
 
 variables:
-  - group: Generic Variables # This Variable Group will need creating in your Azure DevOps Project under Pipelines > Library. Remember also to grant the pipelines access to the Variable Groups and link them together
+  - group: Generic Variables # This Variable Group will need creating in your Azure DevOps Project under Pipelines > Library. 
+  - group: TEST Environment Variables # This Variable Group will need creating in your Azure DevOps Project under Pipelines > Library. 
+  - group: PROD Environment Variables # This Variable Group will need creating in your Azure DevOps Project under Pipelines > Library. 
   - name: ImportMode
     value: ${{ parameters.SolutionImportMode }}
 
@@ -42,7 +44,7 @@ stages:
     jobs:
     - deployment: deployToTEST
       variables:
-        - group: TEST Environment Variables # This Variable Group will need creating in your Azure DevOps Project under Pipelines > Library. Remember also to grant the pipelines access to the Variable Groups and link them together
+        - group: TEST Environment Variables # This Variable Group will need creating in your Azure DevOps Project under Pipelines > Library. 
       pool:
         vmImage: 'windows-latest'
       displayName: "Deploy to TEST"
@@ -63,7 +65,7 @@ stages:
     jobs:
     - deployment: deployToPROD
       variables:
-        - group: PROD Environment Variables # This Variable Group will need creating in your Azure DevOps Project under Pipelines > Library. Remember also to grant the pipelines access to the Variable Groups and link them together
+        - group: PROD Environment Variables # This Variable Group will need creating in your Azure DevOps Project under Pipelines > Library. 
       pool:
         vmImage: 'windows-latest'
       displayName: "Deploy to PROD"
