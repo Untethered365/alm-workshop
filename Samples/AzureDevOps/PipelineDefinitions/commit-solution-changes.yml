@@ -12,14 +12,14 @@ parameters:
     type: string
 
 variables:
-  - group: Generic Variables # This Variable Group will need creating in your Azure DevOps Project under Pipelines > Library. Remember also to grant the pipelines access to the Variable Groups and link them together
-    
+  - group: Generic Variables # This Variable Group will need creating in your Azure DevOps Project under Pipelines > Library.
+  - group: 'DEV Environment Variables' # This Variable Group will need creating in your Azure DevOps Project under Pipelines > Library. 
 
 stages:
   - stage: exportUnpackAndCommitSolution
     displayName: 'Export, Unpack and Commit Solution'
     variables:
-      - group: 'DEV Environment Variables' # This Variable Group will need creating in your Azure DevOps Project under Pipelines > Library. Remember also to grant the pipelines access to the Variable Groups and link them together
+      - group: 'DEV Environment Variables' # This Variable Group will need creating in your Azure DevOps Project under Pipelines > Library. 
     jobs:
     - job: exportUnpackAndCommitSolution
       pool:
