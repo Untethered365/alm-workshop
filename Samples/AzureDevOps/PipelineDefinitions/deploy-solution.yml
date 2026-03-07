@@ -27,7 +27,11 @@ parameters:
     default: true
 
 variables:
-  - group: Generic Variables # This Variable Group will need creating in your Azure DevOps Project under Pipelines > Library. Remember also to grant the pipelines access to the Variable Groups and link them together
+  - group: Generic Variables # This Variable Group will need creating in your Azure DevOps Project under Pipelines > Library. 
+  - group: TEST Environment Variables # This Variable Group will need creating in your Azure DevOps Project under Pipelines > Library. 
+  - group: PROD Environment Variables # This Variable Group will need creating in your Azure DevOps Project under Pipelines > Library. 
+  - group: HFXDEV Environment Variables # This Variable Group will need creating in your Azure DevOps Project under Pipelines > Library.
+  - group: HFXTEST Environment Variables # This Variable Group will need creating in your Azure DevOps Project under Pipelines > Library. 
   - name: ImportMode
     value: ${{ parameters.SolutionImportMode }}
 
@@ -44,7 +48,7 @@ stages:
     jobs:
     - deployment: deployToTEST
       variables:
-        - group: TEST Environment Variables # This Variable Group will need creating in your Azure DevOps Project under Pipelines > Library. Remember also to grant the pipelines access to the Variable Groups and link them together
+        - group: TEST Environment Variables # This Variable Group will need creating in your Azure DevOps Project under Pipelines > Library. 
       pool:
         vmImage: 'windows-latest'
       displayName: "Deploy to TEST"
@@ -66,7 +70,7 @@ stages:
     jobs:
     - deployment: deployToPROD
       variables:
-        - group: PROD Environment Variables # This Variable Group will need creating in your Azure DevOps Project under Pipelines > Library. Remember also to grant the pipelines access to the Variable Groups and link them together
+        - group: PROD Environment Variables # This Variable Group will need creating in your Azure DevOps Project under Pipelines > Library. 
       pool:
         vmImage: 'windows-latest'
       displayName: "Deploy to PROD"
@@ -80,9 +84,10 @@ stages:
               SolutionName: ${{ parameters.SolutionName }}
               OverwriteUnmanagedCustomisations: ${{ parameters.OverwriteUnmanagedCustomisations }}
               SkipLowerVersion: ${{ parameters.SkipLowerVersion }}
+    
     - deployment: deployToHFXDEV
       variables:
-        - group: HFXDEV Environment Variables # This Variable Group will need creating in your Azure DevOps Project under Pipelines > Library. Remember also to grant the pipelines access to the Variable Groups and link them together
+        - group: HFXDEV Environment Variables # This Variable Group will need creating in your Azure DevOps Project under Pipelines > Library. 
       pool:
         vmImage: 'windows-latest'
       displayName: "Deploy to HFXDEV"
@@ -94,6 +99,7 @@ stages:
           - template: ../Templates/prepare-hotfix-env-template.yml
             parameters:
               SolutionName: ${{ parameters.SolutionName }}
+    
     - job: resetHotfixBranch
       pool:
         vmImage: 'windows-latest'
@@ -108,7 +114,7 @@ stages:
     jobs:
     - deployment: deployToHFXTEST
       variables:
-        - group: HFXTEST Environment Variables # This Variable Group will need creating in your Azure DevOps Project under Pipelines > Library. Remember also to grant the pipelines access to the Variable Groups and link them together
+        - group: HFXTEST Environment Variables # This Variable Group will need creating in your Azure DevOps Project under Pipelines > Library. 
       pool:
         vmImage: 'windows-latest'
       displayName: "Deploy to HFXTEST"
@@ -130,7 +136,7 @@ stages:
     jobs:
     - deployment: deployToPROD
       variables:
-        - group: PROD Environment Variables # This Variable Group will need creating in your Azure DevOps Project under Pipelines > Library. Remember also to grant the pipelines access to the Variable Groups and link them together
+        - group: PROD Environment Variables # This Variable Group will need creating in your Azure DevOps Project under Pipelines > Library. 
       pool:
         vmImage: 'windows-latest'
       displayName: "Deploy to PROD"
