@@ -39,18 +39,6 @@ steps:
     name: setConnectionVariablesSP
     displayName: Set Connection Variables for SP
 
-  # Sometimes username/password authentication might be required for things that don't support Service Principal authentication.
-  # So we have a seperate Service Connection pointing to the same DEV environment but using username/pasword authentication.
-  # Pick up the connection details from such a Service Connection for later use
-  - task: PowerPlatformSetConnectionVariables@2
-    inputs:
-      authenticationType: 'PowerPlatformEnvironment'
-      PowerPlatformEnvironment: '$(UsernamePasswordServiceConnection)'
-      ApplicationId: '$(ApplicationId)' 
-      RedirectUri: '$(RedirectUri)'
-    name: setConnectionVariables
-    displayName: Set Connection Variables  
-
   # Determine the updated solution version number using our custom script for Main branch. Update paths as required in the following command
   - pwsh: "$(Build.SourcesDirectory)/Samples/AzureDevOps/Scripts/SyncSolutionVersion.ps1 -serverURL '$(BuildTools.EnvironmentUrl)' -clientId '$(setConnectionVariablesSP.BuildTools.ApplicationId)' -clientSecret '$(setConnectionVariablesSP.BuildTools.ClientSecret)'  -solutionUniqueName '${{ parameters.SolutionName }}' -incrementBuild $true -incrementRevision $false -startingFilePath '$(Build.SourcesDirectory)/Samples/AzureDevOps/Scripts'"
     condition: eq(variables['Build.SourceBranchName'], 'main')
