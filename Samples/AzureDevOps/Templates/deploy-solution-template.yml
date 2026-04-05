@@ -26,30 +26,13 @@ steps:
       authenticationType: 'PowerPlatformSPN'
       PowerPlatformSPN: '$(SPNServiceConnection)' 
     name: setConnectionVariablesSP
-    displayName: Set Connection Variables for SP
-
-  # Sometimes username/password authentication might be required for things that don't support Service Principal authentication.
-  # So we have a seperate Service Connection pointing to the same DEV environment but using username/pasword authentication.
-  # Pick up the connection details from such a Service Connection for later use
-  - task: PowerPlatformSetConnectionVariables@2
-    inputs:
-      authenticationType: 'PowerPlatformEnvironment'
-      PowerPlatformEnvironment: '$(UsernamePasswordServiceConnection)'
-      ApplicationId: '$(ApplicationId)' 
-      RedirectUri: '$(RedirectUri)'
-    name: setConnectionVariables
-    displayName: Set Connection Variables  
+    displayName: Set Connection Variables for SP 
 
   # Check if the intended solution is already instead, and if so, what version    
   - pwsh: "$(Pipeline.Workspace)/CI-Build/Scripts/IsSolutionInstalled.ps1 -serverURL '$(BuildTools.EnvironmentUrl)' -clientId '$(setConnectionVariablesSP.BuildTools.ApplicationId)' -clientSecret '$(setConnectionVariablesSP.BuildTools.ClientSecret)'  -solutionUniqueName '${{ parameters.SolutionName }}' -solutionFilePath '$(Pipeline.Workspace)/CI-Build/Solutions/${{ parameters.SolutionName }}_managed.zip'"
     name: checkSolutionCurrentInstallationStatus
     displayName: Check Solution Installation Status for Solution ${{ parameters.SolutionName }} 
   
-  # Transform Deployment Settings file
-  - pwsh: "$(Pipeline.Workspace)/CI-Build/Scripts/TransformDeploymentSettingsFile.ps1 -settingsFilePath '$(Pipeline.Workspace)/CI-Build/Settings/${{ parameters.SolutionName }}.json' -environmentVariablesValues '$(EnvironmentVariableValues)' -connectionTokens '$(ConnectionReferenceTokens)' -environmentId '$(EnvironmentID)' -username $(setConnectionVariables.BuildTools.UserName) -password $(setConnectionVariables.BuildTools.Password)"
-    name: transformDeploymentSettingsFile
-    displayName: Transform Deployment Settings File for Solution ${{ parameters.SolutionName }}
-
   # Import the solution as Stage and Upgrade
   - task: PowerPlatformImportSolution@2
     condition: and(eq(variables['ImportMode'], 'Modern Upgrade'), ne(variables['currentSolutionStatus'], 'NotInstalled'))
