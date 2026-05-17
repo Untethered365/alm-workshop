@@ -1,0 +1,127 @@
+parameters:
+  - name: SolutionName
+    type: string
+    default: EnvironmentRetention
+  
+  - name: CommitMessage
+    type: string
+
+steps:
+  # Checkout the repository
+  - checkout: self
+    persistCredentials: true
+
+  # Set the Git configuration to handle long paths and ensure the correct user details are set    
+  - task: CmdLine@2
+    name: setGitConfig
+    displayName: Set Git Config
+    inputs:
+      script: |
+        git config --global core.longpaths true
+        git config --global user.email "$(Build.RequestedForEmail)"
+        git config --global user.name "$(Build.RequestedFor)"
+        git -c http.extraheader="AUTHORIZATION: bearer $(System.AccessToken)" fetch
+        git -c http.extraheader="AUTHORIZATION: bearer $(System.AccessToken)" checkout -B $(Build.SourceBranchName)   
+
+  # Install the Power Platform Tools on the agent
+  - task: PowerPlatformToolInstaller@2
+    name: installPowerPlatformTools
+    displayName: Install Power Platform Tools
+    inputs:
+      DefaultVersion: false
+      AddToolsToPath: true
+
+  # Pick up the connection details from the Service Connection for later use
+  - task: PowerPlatformSetConnectionVariables@2
+    inputs:
+      authenticationType: 'PowerPlatformSPN'
+      PowerPlatformSPN: '$(SPNServiceConnection)' 
+    name: setConnectionVariablesSP
+    displayName: Set Connection Variables for SP
+
+  # Determine the updated solution version number using our custom script for Main branch. Update paths as required in the following command
+  - pwsh: "$(Build.SourcesDirectory)/Samples/AzureDevOps/Scripts/SyncSolutionVersion.ps1 -serverURL '$(BuildTools.EnvironmentUrl)' -clientId '$(setConnectionVariablesSP.BuildTools.ApplicationId)' -clientSecret '$(setConnectionVariablesSP.BuildTools.ClientSecret)'  -solutionUniqueName '${{ parameters.SolutionName }}' -incrementBuild $true -incrementRevision $false -startingFilePath '$(Build.SourcesDirectory)/Samples/AzureDevOps/Scripts'"
+    condition: eq(variables['Build.SourceBranchName'], 'main')
+    name: syncSolutionVersionForMain
+    displayName: Sync Solution Version for Main
+
+  ##########------------------------> ANSWER Below <-----------------------------##########
+  # Update the solution version number as determined by the previous step
+  - task: PowerPlatformSetSolutionVersion@2
+    name: setSolutionVersion
+    displayName: Set Solution Version
+    inputs:
+      authenticationType: 'PowerPlatformSPN'
+      PowerPlatformSPN: '$(SPNServiceConnection)'
+      SolutionName: '${{ parameters.SolutionName }}'
+      SolutionVersionNumber: '$(newSolutionVersion)'
+
+  # Publish all customisations in the source environment to ensure everything is up to date before exporting    
+  - task: PowerPlatformPublishCustomizations@2
+    name: publishAllCustomisations
+    displayName: Publish All Customisations
+    inputs:
+      authenticationType: 'PowerPlatformSPN'
+      PowerPlatformSPN: '$(SPNServiceConnection)'
+      AsyncOperation: true
+      MaxAsyncWaitTime: '60'
+
+  # Export the unmanaged solution first    
+  - task: PowerPlatformExportSolution@2
+    name: exportUnmanagedSolution
+    displayName: Export Unmanaged Solution
+    inputs:
+      authenticationType: 'PowerPlatformSPN'
+      PowerPlatformSPN: '$(SPNServiceConnection)'
+      AsyncOperation: true
+      MaxAsyncWaitTime: '60'
+      SolutionName: '${{ parameters.SolutionName }}'
+      Managed: false
+      SolutionOutputFile: '$(Build.ArtifactStagingDirectory)\${{ parameters.SolutionName }}.zip'
+      OverwriteLocalSolution: true
+  ##########------------------------> ANSWER above <-----------------------------##########
+
+  # Now export the managed solution    
+  - task: PowerPlatformExportSolution@2
+    name: exportManagedSolution
+    displayName: Export Managed Solution
+    inputs:
+      authenticationType: 'PowerPlatformSPN'
+      PowerPlatformSPN: '$(SPNServiceConnection)'
+      AsyncOperation: true
+      MaxAsyncWaitTime: '60'
+      SolutionName: '${{ parameters.SolutionName }}'
+      Managed: true
+      SolutionOutputFile: '$(Build.ArtifactStagingDirectory)\${{ parameters.SolutionName }}_managed.zip'
+      OverwriteLocalSolution: true
+
+  # Unpack the exported solutions into the source directory         
+  - task: PowerPlatformUnpackSolution@2
+    name: unpackSolution
+    displayName: Unpack Solution
+    inputs:
+      SolutionInputFile: '$(Build.ArtifactStagingDirectory)\${{ parameters.SolutionName }}.zip'
+      SolutionTargetFolder: '$(Build.SourcesDirectory)\Samples\AzureDevOps\Solutions\${{ parameters.SolutionName }}' # Update this path as required
+      SolutionType: 'Both'
+      OverwriteFiles: true
+  
+  # The solution we have just exported and unpacked may contain Environment Variables and Connection References that will need configuring when deploying to other environments.
+  # So let's invoke the PAC CLI to generate a settings file that contains these variables and references for later use in deployments.
+  - pwsh: pac solution create-settings --solution-zip "$(Build.ArtifactStagingDirectory)\${{ parameters.SolutionName }}.zip" --settings-file "$(Build.SourcesDirectory)\Samples\AzureDevOps\Settings\${{ parameters.SolutionName }}.json" # Update this path as required
+    name: generateDeploymentSettingsFile
+    displayName: Generate Deployment Settings File
+
+  # Now we need to tokenise the settings file to replace the environment variables and connection references with tokens that can be replaced at deployment time.  
+  - pwsh:  $(Build.SourcesDirectory)\Samples\AzureDevOps\Scripts\TokeniseDeploymentSettingsFile.ps1 -settingsFilePath "$(Build.SourcesDirectory)\Samples\AzureDevOps\Settings\${{ parameters.SolutionName }}.json" -environmentVariablesTokens '$(EnvironmentVariableTokens)' -connectionReferencesTokens '$(ConnectionReferenceTokens)'
+    name: tokeniseDeploymentSettingsFile
+    displayName: Tokenise Deployment Settings File
+
+  # Now we need to commit the changes made to the solution files and the settings file back to the repository.  
+  - task: CmdLine@2
+    name: commitSolutionChanges
+    displayName: Commit Solution Changes
+    inputs:
+      script: |
+        git add --all --verbose --force
+        git commit -m "${{ parameters.CommitMessage }}"
+        git -c http.extraheader="AUTHORIZATION: bearer $(System.AccessToken)" push origin $(Build.SourceBranchName)
