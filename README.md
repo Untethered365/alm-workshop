@@ -6,5 +6,4 @@ We also deliver a shorter version of this course as an all-day hands-on workshop
 
 [Nordic Summit 2025: 19th-20th September, Gothenburg, Sweden](https://nordicsummit.info/pre-day-workshops/#Architecture)  
 [Canadian Power Platform Summit 2026: 20th-21st March, Vancouver, Canada](https://canadianpowerplatformsummit.com/workshops.html)
-
 [Power Platform Community Conference, Las Vegas](https://powerplatformconf.com/workshops/The-ALM---CICD-Session-You've-Been-Waiting-For)
