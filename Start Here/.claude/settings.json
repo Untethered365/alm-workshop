@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(./my-alm-setup.json)",
+      "Edit(./my-alm-setup.json)"
+    ]
+  }
+}

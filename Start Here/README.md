@@ -7,6 +7,24 @@ In this workshop you'll build a real ALM (Application Lifecycle Management) setu
 - An app registration (service principal) your pipelines use to deploy
 - An Azure DevOps project, with a ready-made connection to each environment
 
+## Recommended: let an AI assistant walk you through it
+
+You'll find this much easier with an AI assistant beside you in VS Code. It knows these steps, tells you what to do next, and explains any error you hit.
+
+1. **Install [Visual Studio Code](https://code.visualstudio.com/download)** if you don't have it.
+2. **Get this code.** On the [repository page](https://github.com/Untethered365/alm-workshop), select **Code** > **Download ZIP** and unzip it. (If you use Git: `git clone https://github.com/Untethered365/alm-workshop.git`.)
+3. **Open the `Start Here` folder** in VS Code: **File** > **Open Folder** > select **`Start Here`**. Open this folder itself, not the whole download, so the assistant picks up its instructions.
+4. **Open an AI assistant**, either:
+   - **GitHub Copilot** (has a free tier): select the Copilot icon at the top of VS Code, sign in with a GitHub account, and switch the chat to **Agent** mode.
+   - **Claude Code** (needs a Claude subscription): install the **Claude Code** extension from the Extensions view and open it.
+5. **Paste this to get started:**
+
+   > I'm setting up for the Power Platform ALM workshop. Please guide me through the Start Here setup one step at a time.
+
+The assistant will ask you a few questions and take you through everything below. It can't click through the browser sign-ups for you, but it tells you exactly what to click and waits while you do.
+
+Prefer to do it yourself? Everything you need is below.
+
 ## Before you start, answer one question: are you an admin of a Microsoft tenant?
 
 - **Yes, I'm an admin.** Great. [Install the tools](#install-the-tools), then [run the readiness check](Part%201%20-%20Set%20Up/README.md#step-1-run-the-readiness-check) to confirm you have everything.
@@ -76,4 +94,4 @@ The scripts never ask for your password. They open the normal Microsoft sign-in 
 
 The setup scripts save everything they create to `my-alm-setup.json` in this folder: environment URLs, your app ID and the **client secret**. You'll need these values during the workshop.
 
-**Keep this file private.** The secret gives full access to your environments. Don't email it, don't commit it to Git, and delete it after the workshop.
+**Keep this file private.** The secret gives full access to your environments. Don't email it, don't commit it to Git, don't paste it into an AI chat, and delete it after the workshop. The AI assistant instructions tell it never to open this file. If you need a value from it, open it yourself.
