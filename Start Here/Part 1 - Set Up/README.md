@@ -52,12 +52,7 @@ Power Platform **won't accept a personal account** (outlook.com, hotmail.com, gm
 2. Choose the **Developer Plan** (it may say **Try free** or **Get started free**) and enter your work account email.
 3. Complete the sign-up. You land in Power Apps, and it starts creating a first environment called *"(your name)'s Environment"*.
 
-That first environment counts toward your limit of **3 Developer environments**, and the workshop needs 3 of its own. After it appears, delete it:
-
-1. Go to https://admin.powerplatform.microsoft.com > **Manage** > **Environments**.
-2. Select *"(your name)'s Environment"* > **Delete**.
-
-(The readiness check will remind you if you forget.)
+**Leave that environment alone.** It's created without a Dataverse database, and it uses one of your **3 Developer environment** slots. The setup script automatically turns it into your **ALM-DEV** environment: it renames it and adds a database. You don't need to rename or delete it yourself.
 
 ### D. Create your Azure DevOps organization
 
@@ -114,7 +109,7 @@ It takes about 10-20 minutes, mostly waiting for environments to be created. It 
 
 1. Sign you in (reusing the sign-in from the check).
 2. Pick your Azure DevOps org. If you have more than one, it asks which.
-3. Create **ALM-DEV**, **ALM-TEST** and **ALM-PROD** Developer environments. Any that already exist are reused.
+3. Create **ALM-DEV**, **ALM-TEST** and **ALM-PROD** Developer environments. Any that already exist are reused. If you're short on slots, a Developer environment you own that has **no database** (like the one from the Developer Plan sign-up) is renamed and given a database instead.
 4. Create an app registration called **ALM-Workshop-Pipelines** with a client secret (valid 1 year).
 5. Add that app as **System Administrator** in all three environments.
 6. Create an Azure DevOps project called **ALM-Workshop**, install the **Power Platform Build Tools**, and create a service connection for each environment (named `ALM-DEV`, `ALM-TEST`, `ALM-PROD`).
@@ -137,8 +132,10 @@ It takes about 10-20 minutes, mostly waiting for environments to be created. It 
 
 | Problem | Fix |
 |---|---|
+| "...is not digitally signed. You cannot run this script" | Files from a downloaded ZIP are blocked. From the `Start Here` folder, run `Get-ChildItem -Recurse \| Unblock-File`, then try again. |
 | "You're signed in with a personal or guest account" | Run with `-SwitchAccount` and sign in with your `admin@...onmicrosoft.com` work account (Path 2, step B). |
-| "You need N more Developer environment(s)" | Delete Developer environments you don't need at https://admin.powerplatform.microsoft.com > Environments. |
+| "Couldn't add a database" or "is in a failed state" | In https://admin.powerplatform.microsoft.com, open that environment and select **Add Dataverse**. Or delete it and run the script again to get a fresh one. |
+| "You need N more Developer environment(s)" | You own too many Developer environments. Delete ones you don't need at https://admin.powerplatform.microsoft.com > Environments. |
 | "No Azure DevOps org connected to this tenant" | Either your work account isn't a member of the org yet (Path 2, step D, "Add your work account to the org"), or the org isn't connected to your tenant (step D, "Check the org belongs to your tenant"). |
 | Pipeline says "No hosted parallelism has been purchased" | Set up billing with your Azure subscription (Path 2, step D, "Check pipelines can run"). |
 | Browser sign-in never appears | Check the taskbar for a hidden window, or run with `-UseDeviceCode`. |

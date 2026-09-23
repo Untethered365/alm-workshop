@@ -3,7 +3,7 @@
 #
 # Everything here runs as the ATTENDEE, in their own tenant. All tokens come from a
 # single Azure CLI sign-in (Graph, Power Platform, Dataverse, Azure DevOps). PAC CLI
-# is signed in separately because it is used to create environments.
+# is signed in separately; it adds users to environments owned by someone else (hotfix).
 #
 # Keep this file ASCII-only: Windows PowerShell 5.1 misreads non-ASCII characters
 # in files without a BOM.
@@ -13,6 +13,9 @@ $script:PowerPlatformResource = 'https://service.powerapps.com/'
 $script:BapBase = 'https://api.bap.microsoft.com/providers/Microsoft.BusinessAppPlatform'
 $script:StateFile = Join-Path (Split-Path $PSScriptRoot -Parent) 'my-alm-setup.json'
 $script:DeveloperEnvironmentLimit = 3
+
+# Web request progress bars leave blank lines behind in the output and slow requests down
+$ProgressPreference = 'SilentlyContinue'
 
 # Entra ID built-in role template IDs (identical in every tenant)
 $script:RoleIds = @{
@@ -60,7 +63,25 @@ function Test-WorkshopTools
         Write-Hint "Install it from https://aka.ms/installazurecliwindows then open a NEW PowerShell window"
         $ok = $false
     }
-    if (Get-Command pac -ErrorAction SilentlyContinue) { Write-Ok "Power Platform CLI (pac) is installed" }
+    if (Get-Command pac -ErrorAction SilentlyContinue)
+    {
+        Write-Ok "Power Platform CLI (pac) is installed"
+        # Old versions break as Microsoft's APIs change, so nudge people to stay current
+        $installed = $null
+        if ((pac 2>&1 | Out-String) -match 'Version:\s*(\d+\.\d+\.\d+)') { $installed = [version]$Matches[1] }
+        $latest = $null
+        try
+        {
+            $versions = (Invoke-RestMethod -Uri 'https://api.nuget.org/v3-flatcontainer/microsoft.powerapps.cli/index.json' -ErrorAction Stop).versions
+            $latest = $versions | Where-Object { $_ -match '^\d+\.\d+\.\d+$' } | ForEach-Object { [version]$_ } | Sort-Object | Select-Object -Last 1
+        }
+        catch { }
+        if ($installed -and $latest -and $installed -lt $latest)
+        {
+            Write-Warn "Your Power Platform CLI is version $installed; the latest is $latest"
+            Write-Hint "Update it with: pac install latest"
+        }
+    }
     else
     {
         Write-Bad "Power Platform CLI (pac) is not installed"
@@ -172,6 +193,12 @@ function Invoke-WorkshopRest($Method, $Uri, $Resource, $Body = $null, $ExtraHead
         $params.Body = ($Body | ConvertTo-Json -Depth 20)
         $params.ContentType = 'application/json'
     }
+    elseif ($Method -ne 'GET')
+    {
+        # Without this, PowerShell labels a body-less POST as a form post, which Azure DevOps rejects
+        $params.Body = ''
+        $params.ContentType = 'application/json'
+    }
     return Invoke-RestMethod @params
 }
 
@@ -232,6 +259,7 @@ function Get-MyEnvironments
             Url         = if ($p.linkedEnvironmentMetadata) { $p.linkedEnvironmentMetadata.instanceUrl } else { $null }
             State       = if ($p.linkedEnvironmentMetadata) { $p.linkedEnvironmentMetadata.instanceState } else { $null }
             Provisioning = $p.provisioningState
+            HasDataverse = [bool]($p.linkedEnvironmentMetadata -and $p.linkedEnvironmentMetadata.instanceUrl)
         }
     })
 }
@@ -252,15 +280,65 @@ function Get-EnvironmentDomain($tenantShort, $prefix, $suffix)
     return (& $clean $tenantShort 8) + (& $clean $prefix 5) + (& $clean $suffix 7)
 }
 
-# Waits until an environment with this display name has a ready Dataverse database.
-function Wait-EnvironmentReady($displayName, $timeoutMinutes = 20)
+# Creates a Developer environment (without a database yet - add one with Add-DataverseDatabase)
+# and returns its ID. Uses the Power Platform API directly because 'pac admin create --type Developer'
+# fails with "macroRegion '<region>' is not valid" (PAC CLI 2.4 through 2.12, September 2026): the
+# service now wants a macroRegion instead of a location for Developer environments.
+function New-DeveloperEnvironment($displayName, $region)
+{
+    # Only unitedstates -> north-america is confirmed; other regions try the old form first
+    $macroRegions = @{ unitedstates = 'north-america' }
+    $attempts = @()
+    if ($macroRegions.ContainsKey($region)) { $attempts += @{ macroRegion = $macroRegions[$region] } }
+    else { $attempts += @{ location = $region }; $attempts += @{ macroRegion = $region } }
+
+    $lastError = $null
+    foreach ($where in $attempts)
+    {
+        $body = @{ properties = @{ displayName = $displayName; environmentSku = 'Developer' } }
+        foreach ($k in $where.Keys) { $body[$k] = $where[$k] }
+        try
+        {
+            $created = Invoke-WorkshopRest POST "$($script:BapBase)/environments?api-version=2020-10-01" $script:PowerPlatformResource $body
+            return $created.name
+        }
+        catch { $lastError = Get-ErrorText $_ }
+    }
+    throw $lastError
+}
+
+function Rename-WorkshopEnvironment($environmentId, $newName)
+{
+    Invoke-WorkshopRest PATCH "$($script:BapBase)/scopes/admin/environments/$($environmentId)?api-version=2020-10-01" $script:PowerPlatformResource @{ properties = @{ displayName = $newName } } | Out-Null
+}
+
+# Adds a Dataverse database to an environment that doesn't have one (the "Add Dataverse"
+# button in the admin center; same call as New-AdminPowerAppCdsDatabase). Runs in the background.
+function Add-DataverseDatabase($environmentId)
+{
+    $body = @{ baseLanguage = 1033; currency = @{ code = 'USD' }; templates = @() }
+    Invoke-WorkshopRest POST "$($script:BapBase)/environments/$($environmentId)/provisionInstance?api-version=2018-01-01" $script:PowerPlatformResource $body | Out-Null
+}
+
+# Waits until an environment (matched by ID if given, otherwise by display name) has a ready Dataverse database.
+# -DatabaseRequested: a database was just requested, so don't treat "no database yet" as a failure.
+function Wait-EnvironmentReady($displayName, $timeoutMinutes = 20, $EnvironmentId = $null, [switch]$DatabaseRequested)
 {
     $deadline = (Get-Date).AddMinutes($timeoutMinutes)
+    $noDatabaseChecks = 0
     while ((Get-Date) -lt $deadline)
     {
-        $env = Get-MyEnvironments | Where-Object { $_.DisplayName -eq $displayName } | Select-Object -First 1
+        if ($EnvironmentId) { $env = Get-MyEnvironments | Where-Object { $_.Id -eq $EnvironmentId } | Select-Object -First 1 }
+        else { $env = Get-MyEnvironments | Where-Object { $_.DisplayName -eq $displayName } | Select-Object -First 1 }
         if ($env -and $env.Url -and $env.State -eq 'Ready' -and $env.Provisioning -eq 'Succeeded') { return $env }
-        Write-Step "  Waiting for $displayName to finish provisioning..."
+        # Finished provisioning but still no database after a few checks means it never will - stop waiting
+        if ($env -and $env.Provisioning -match 'Failed') { throw "Environment '$($env.DisplayName)' is in a failed state ($($env.Provisioning)). Check it at https://admin.powerplatform.microsoft.com." }
+        if (-not $DatabaseRequested -and $env -and $env.Provisioning -eq 'Succeeded' -and -not $env.HasDataverse) { $noDatabaseChecks++ } else { $noDatabaseChecks = 0 }
+        if ($noDatabaseChecks -ge 6)
+        {
+            throw "Environment '$($env.DisplayName)' has no Dataverse database. Delete it at https://admin.powerplatform.microsoft.com (Manage > Environments), then run this script again so it can be recreated with one."
+        }
+        Write-Step "  Waiting for $displayName to be ready..."
         Start-Sleep -Seconds 30
     }
     throw "Environment $displayName was not ready after $timeoutMinutes minutes."
@@ -450,7 +528,11 @@ function Select-AdoOrganization($tenantId, [string]$Preferred)
         if ($Preferred)
         {
             $match = $mine | Where-Object { $_.Name -eq $Preferred }
-            if ($match) { return $match.Name }
+            if ($match)
+            {
+                Write-Ok "Using Azure DevOps org: $($match.Name)"
+                return $match.Name
+            }
             Write-Warn "Azure DevOps org '$Preferred' is not one of your orgs in this tenant - ignoring it"
             $Preferred = $null
         }

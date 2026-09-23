@@ -55,7 +55,6 @@ if (-not (Connect-WorkshopPac -TenantId $tenantId -UseDeviceCode:$UseDeviceCode)
 Write-Ok "Power Platform CLI is signed in to the same tenant"
 
 $me = Invoke-Graph GET "/me?`$select=id,userPrincipalName"
-$tenantShort = Get-TenantShortName
 
 $state = [ordered]@{}
 if (Test-Path $script:StateFile)
@@ -83,6 +82,38 @@ Save-State
 Write-Section "3. Power Platform environments"
 # ---------------------------------------------------------------------------
 $environments = @(Get-MyEnvironments)
+$envNames = @($envSuffixes | ForEach-Object { "$Prefix-$_" })
+$databaseRequested = @{}
+
+# The Developer Plan sign-up creates an environment with no database, which uses up one of the
+# 3 Developer slots. If we're short on slots, convert environments like that into workshop
+# environments (rename + add a database) instead of making people delete them. Environments
+# without a database hold no Dataverse data, so this can't damage anything.
+$missing = @($envNames | Where-Object { $n = $_; -not ($environments | Where-Object { $_.DisplayName -eq $n }) })
+$ownedDev = @($environments | Where-Object { $_.Sku -eq 'Developer' -and $_.OwnerId -eq $me.id })
+$freeSlots = $script:DeveloperEnvironmentLimit - $ownedDev.Count
+$spares = @($ownedDev | Where-Object { -not $_.HasDataverse -and $envNames -notcontains $_.DisplayName -and $_.Provisioning -eq 'Succeeded' })
+$i = 0
+while ($freeSlots -lt ($missing.Count - $i) -and $i -lt $spares.Count)
+{
+    $spare = $spares[$i]
+    $name = $missing[$i]
+    Write-Step "Converting '$($spare.DisplayName)' (no database yet) into $name..."
+    try
+    {
+        Rename-WorkshopEnvironment $spare.Id $name
+        Write-Ok "Renamed '$($spare.DisplayName)' to $name"
+    }
+    catch
+    {
+        Write-Bad "Couldn't rename '$($spare.DisplayName)': $(Get-ErrorText $_)"
+        Write-Hint "Delete it at https://admin.powerplatform.microsoft.com (Manage > Environments), then run this script again."
+        exit 1
+    }
+    $i++
+}
+if ($i -gt 0) { $environments = @(Get-MyEnvironments) }
+
 $workshopEnvs = @()
 foreach ($suffix in $envSuffixes)
 {
@@ -90,7 +121,21 @@ foreach ($suffix in $envSuffixes)
     $existing = $environments | Where-Object { $_.DisplayName -eq $name } | Select-Object -First 1
     if ($existing)
     {
-        Write-Ok "$name already exists - reusing it"
+        if (-not $existing.HasDataverse -and $existing.Provisioning -eq 'Succeeded')
+        {
+            Write-Step "$name has no Dataverse database - adding one (usually 2-5 minutes)..."
+            try { Add-DataverseDatabase $existing.Id }
+            catch
+            {
+                Write-Bad "Couldn't add a database to $($name): $(Get-ErrorText $_)"
+                Write-Hint "In https://admin.powerplatform.microsoft.com, open $name and select 'Add Dataverse', or delete it and run this script again."
+                exit 1
+            }
+            $databaseRequested[$name] = $true
+        }
+        else { Write-Ok "$name already exists - reusing it" }
+        $workshopEnvs += (Wait-EnvironmentReady $name -EnvironmentId $existing.Id -DatabaseRequested:([bool]$databaseRequested[$name]))
+        continue
     }
     else
     {
@@ -98,24 +143,27 @@ foreach ($suffix in $envSuffixes)
         if ($owned -ge $script:DeveloperEnvironmentLimit)
         {
             Write-Bad "Can't create $name - you already own $owned Developer environments (the limit)."
-            Write-Hint "Delete one at https://admin.powerplatform.microsoft.com, then run this script again."
+            Write-Hint "Delete one you don't need at https://admin.powerplatform.microsoft.com, then run this script again."
             exit 1
         }
 
-        $domain = Get-EnvironmentDomain $tenantShort $Prefix $suffix
-        Write-Step "Creating $name ($domain) in $Region - this usually takes 2-5 minutes..."
-        $out = pac admin create --name $name --type Developer --domain $domain --region $Region 2>&1 | Out-String
-        if ($out -match 'Error:')
+        Write-Step "Creating $name in $Region, then adding its database - this usually takes 2-5 minutes..."
+        try
         {
-            Write-Bad "Couldn't create $name"
-            Write-Hint ($out.Trim())
+            $newId = New-DeveloperEnvironment $name $Region
+            Add-DataverseDatabase $newId
+        }
+        catch
+        {
+            Write-Bad "Couldn't create $($name): $(Get-ErrorText $_)"
             Write-Hint "Run .\Test-Readiness.ps1 to see what's missing."
             exit 1
         }
         Write-Ok "Created $name"
         $environments = @(Get-MyEnvironments)
+        $workshopEnvs += (Wait-EnvironmentReady $name -EnvironmentId $newId -DatabaseRequested)
+        continue
     }
-    $workshopEnvs += (Wait-EnvironmentReady $name)
 }
 
 $state.Environments = @($workshopEnvs | ForEach-Object { [ordered]@{ Name = $_.DisplayName; Id = $_.Id; Url = $_.Url } })

@@ -52,7 +52,19 @@ az --version
 pac
 ```
 
-If PowerShell blocks the scripts with a message about execution policy, run this once:
+**Already had the Power Platform CLI?** Update it to the latest version:
+
+```powershell
+pac install latest
+```
+
+**If you downloaded the ZIP**, Windows marks every file as "from the internet" and PowerShell will refuse to run the scripts (*"...is not digitally signed. You cannot run this script on the current system."*). Remove that mark once. In a PowerShell window opened in the `Start Here` folder, run:
+
+```powershell
+Get-ChildItem -Recurse | Unblock-File
+```
+
+If PowerShell still blocks the scripts with a message about execution policy, also run this once:
 
 ```powershell
 Set-ExecutionPolicy -Scope CurrentUser RemoteSigned

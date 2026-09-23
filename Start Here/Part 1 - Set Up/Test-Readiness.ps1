@@ -140,7 +140,16 @@ $myDeveloperEnvs = @($environments | Where-Object { $_.Sku -eq 'Developer' -and 
 $needed = $envNames.Count - $alreadyThere.Count
 $free = $script:DeveloperEnvironmentLimit - $myDeveloperEnvs.Count
 
-foreach ($e in $alreadyThere) { Write-Ok "$($e.DisplayName) already exists - setup will reuse it" }
+# Developer environments without a database (like the one the Developer Plan sign-up creates)
+# get converted by setup when slots are short, so they count as available
+$spares = @($myDeveloperEnvs | Where-Object { -not $_.HasDataverse -and $envNames -notcontains $_.DisplayName -and $_.Provisioning -eq 'Succeeded' })
+$convertCount = [Math]::Min($spares.Count, [Math]::Max($needed - [Math]::Max($free,0), 0))
+
+foreach ($e in $alreadyThere)
+{
+    if ($e.HasDataverse -or $e.Provisioning -ne 'Succeeded') { Write-Ok "$($e.DisplayName) already exists - setup will reuse it" }
+    else { Write-Ok "$($e.DisplayName) exists without a database - setup will add one" }
+}
 
 if ($needed -eq 0)
 {
@@ -150,11 +159,16 @@ elseif ($free -ge $needed)
 {
     Add-Result 'Power Platform' 'OK' "You have room for $needed more Developer environment(s) ($($myDeveloperEnvs.Count) of $($script:DeveloperEnvironmentLimit) used)"
 }
+elseif (($free + $convertCount) -ge $needed)
+{
+    $names = ($spares | Select-Object -First $convertCount | ForEach-Object { "'$($_.DisplayName)'" }) -join ', '
+    Add-Result 'Power Platform' 'OK' "Setup will convert $names (no database yet) into a workshop environment and create the rest"
+}
 else
 {
     $list = ($myDeveloperEnvs | ForEach-Object { $_.DisplayName }) -join ', '
-    Add-Result 'Power Platform' 'FAIL' "You need $needed more Developer environment(s) but only have $([Math]::Max($free,0)) free (limit is $($script:DeveloperEnvironmentLimit) per person)." `
-        "Delete $($needed - [Math]::Max($free,0)) you no longer need at https://admin.powerplatform.microsoft.com. Yours: $list"
+    $fix = "Delete $($needed - [Math]::Max($free,0) - $convertCount) you no longer need at https://admin.powerplatform.microsoft.com. Yours: $list"
+    Add-Result 'Power Platform' 'FAIL' "You need $needed more Developer environment(s) but only have $([Math]::Max($free,0)) free (limit is $($script:DeveloperEnvironmentLimit) per person)." $fix
 }
 
 $isPowerPlatformAdmin = $isGlobalAdmin -or (Test-HasRole @($R.PowerPlatformAdministrator))
