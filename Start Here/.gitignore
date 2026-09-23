@@ -1,0 +1,2 @@
+# Contains the pipeline client secret and the service account password. Never commit.
+my-alm-setup.json
