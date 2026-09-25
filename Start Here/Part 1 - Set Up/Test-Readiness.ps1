@@ -62,16 +62,6 @@ if ($upn -match '#EXT#' -or $upn -match '@(outlook|hotmail|live|gmail|yahoo)\.')
         "Create a work account inside your tenant (README: 'Create your work account') and sign in with that, using -SwitchAccount."
 }
 
-if (Connect-WorkshopPac -TenantId $tenantId -UseDeviceCode:$UseDeviceCode)
-{
-    Add-Result 'Sign-in' 'OK' "Power Platform CLI is signed in to the same tenant"
-}
-else
-{
-    Add-Result 'Sign-in' 'FAIL' "Power Platform CLI is not signed in to tenant $tenantId." `
-        "Run: pac auth create --tenant $tenantId   (sign in with $upn)"
-}
-
 $me = Invoke-Graph GET "/me?`$select=id,displayName,userPrincipalName"
 $activeRoles = @(Get-MyActiveRoleIds)
 $eligibleRoles = Get-MyEligibleRoleIds $me.id
@@ -244,11 +234,6 @@ else
     Add-Result 'Hotfix' 'WARN' "You can't create user accounts, which the hotfix course needs." `
         $null "The 'User Administrator' role in Entra ID (hotfix course only)" -HotfixOnly
 }
-if (-not $isPowerPlatformAdmin)
-{
-    Add-Result 'Hotfix' 'WARN' "You can't create environments owned by another account, which the hotfix course needs." `
-        $null "The 'Power Platform Administrator' role (hotfix course only)" -HotfixOnly
-}
 try
 {
     $skus = Invoke-Graph GET "/subscribedSkus?`$select=skuPartNumber,prepaidUnits,consumedUnits"
@@ -264,6 +249,9 @@ try
     }
 }
 catch { Add-Result 'Hotfix' 'WARN' "Couldn't read your tenant's licenses." -HotfixOnly }
+# Can't be checked from here (the Azure CLI sign-in isn't allowed to read MFA policies)
+Write-Hint "Reminder: the hotfix service account must not require MFA. See 'Step 1' in the"
+Write-Hint "'Part 2 - Hotfix (For later)' README before running the hotfix setup."
 
 # ---------------------------------------------------------------------------
 Write-Section "Summary"

@@ -1,6 +1,6 @@
 # Core Workshop Setup
 
-This sets up your DEV, TEST and PROD environments and connects them to Azure DevOps.
+This sets up your DEV, TEST and PROD environments and the app registration your pipelines will use. You'll connect them to Azure DevOps yourself in the lessons.
 
 - **Already an admin of a tenant (Path 1)?** Make sure you've [installed the tools](../README.md#install-the-tools), then skip to [Step 1: Run the readiness check](#step-1-run-the-readiness-check).
 - **Need a tenant (Path 2)?** Start with [Path 2: Create your own tenant](#path-2-create-your-own-tenant) below.
@@ -61,11 +61,11 @@ Create the org with your **personal account** from step A, **not** the work acco
 1. In a private window, sign in to https://portal.azure.com with your **personal** account.
 2. Search for **DevOps** and open **Azure DevOps organizations** > **My Azure DevOps Organizations**.
 3. Select **Create new organization** > **Continue**, pick any name (for example `yourname-alm`), and continue.
-4. If it asks you to create a first project, give it any name. The setup script creates its own project later.
+4. If it asks you to create a first project, you can skip it or give it any name. You'll create the workshop project in the lessons.
 
 **Check the org belongs to your tenant.** In the org, open **Organization settings** (bottom left) > **Microsoft Entra**. It should show your tenant's name. If it says it isn't connected, select **Connect directory** and pick your tenant.
 
-**Add your work account to the org.** The setup scripts sign in as your work account, so it needs to be a member:
+**Add your work account to the org.** You'll use your work account for the rest of the workshop, so it needs to be a member:
 
 1. **Organization settings** > **Users** > **Add users**.
 2. Enter your work account (`admin@...onmicrosoft.com`), set **Access level** to **Basic**, and add it.
@@ -89,11 +89,11 @@ It signs you in (browser pop-up) and checks, **without changing anything**:
 
 | Check | What it looks at |
 |---|---|
-| Sign-in | Azure CLI and Power Platform CLI are signed in to the same tenant, with a work account |
+| Sign-in | You're signed in with a work account (not a personal or guest one) |
 | Entra ID | You can create an app registration (by role, by an unactivated role, or by tenant setting) |
 | Power Platform | You have room for 3 Developer environments, your tenant lets you create them, and you have the Developer Plan |
 | Azure DevOps | You have an org connected to this tenant |
-| Hotfix course | You can create a user and environments for them. Only matters if you're taking the hotfix course. |
+| Hotfix course | You can create a user account and the tenant has a spare Developer Plan license. Only matters if you're taking the hotfix course. |
 
 Each line is **[OK]**, **[FAIL]** or **[WARN]**. Warnings won't stop you. If anything fails, the summary tells you how to fix it, and prints a message you can copy to your IT admin if you need a permission.
 
@@ -108,12 +108,12 @@ Run it again until the summary says **You're ready for the core workshop.**
 It takes about 10-20 minutes, mostly waiting for environments to be created. It will:
 
 1. Sign you in (reusing the sign-in from the check).
-2. Pick your Azure DevOps org. If you have more than one, it asks which.
-3. Create **ALM-DEV**, **ALM-TEST** and **ALM-PROD** Developer environments. Any that already exist are reused. If you're short on slots, a Developer environment you own that has **no database** (like the one from the Developer Plan sign-up) is renamed and given a database instead.
-4. Create an app registration called **ALM-Workshop-Pipelines** with a client secret (valid 1 year).
-5. Add that app as **System Administrator** in all three environments.
-6. Create an Azure DevOps project called **ALM-Workshop**, install the **Power Platform Build Tools**, and create a service connection for each environment (named `ALM-DEV`, `ALM-TEST`, `ALM-PROD`).
-7. Save everything to `..\my-alm-setup.json`.
+2. Create **ALM-DEV**, **ALM-TEST** and **ALM-PROD** Developer environments. Any that already exist are reused. If you're short on slots, a Developer environment you own that has **no database** (like the one from the Developer Plan sign-up) is renamed and given a database instead.
+3. Create an app registration called **ALM-Workshop-Pipelines** with a client secret (valid 1 year).
+4. Add that app as **System Administrator** in all three environments.
+5. Print the values the lessons ask for (tenant ID, application ID, each environment's URL and ID) and save everything, including the client secret, to `..\my-alm-setup.json`.
+
+It does **not** touch Azure DevOps. When it finishes, go to the workshop lessons: you'll create the project, service connections and variable groups yourself.
 
 **If something fails, fix it and run the script again.** It checks what already exists and only does what's missing.
 
@@ -121,8 +121,7 @@ It takes about 10-20 minutes, mostly waiting for environments to be created. It 
 
 | Option | Use it when |
 |---|---|
-| `-Region europe` | You want your environments outside the US. Other values: `unitedkingdom`, `australia`, `canada`, `asia`, `japan`, `india`, and more. |
-| `-AdoOrganization myorg` | You want to skip the org question |
+| `-Region europe` | You want your environments outside the US. Other values: `unitedkingdom`, `australia`, `canada`, `asia`, `japan`, `india`, and more. (Only the default, `unitedstates`, has been tested.) |
 | `-SwitchAccount` | You signed in with the wrong account |
 | `-UseDeviceCode` | The browser sign-in won't open |
 

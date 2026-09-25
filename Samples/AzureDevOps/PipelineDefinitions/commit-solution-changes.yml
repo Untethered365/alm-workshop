@@ -14,7 +14,6 @@ parameters:
 variables:
   - group: Generic Variables # This Variable Group will need creating in your Azure DevOps Project under Pipelines > Library. 
   - group: 'DEV Environment Variables' # This Variable Group will need creating in your Azure DevOps Project under Pipelines > Library.
-  - group: 'HFXDEV Environment Variables' # This Variable Group will need creating in your Azure DevOps Project under Pipelines > Library. 
   
 stages:
   - stage: exportUnpackAndCommitSolution

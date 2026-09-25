@@ -2,8 +2,8 @@
 # Dot-source this file; it is not meant to be run on its own.
 #
 # Everything here runs as the ATTENDEE, in their own tenant. All tokens come from a
-# single Azure CLI sign-in (Graph, Power Platform, Dataverse, Azure DevOps). PAC CLI
-# is signed in separately; it adds users to environments owned by someone else (hotfix).
+# single Azure CLI sign-in (Graph, Power Platform, Dataverse, Azure DevOps). The PAC CLI
+# isn't used: its environment creation is broken (see New-DeveloperEnvironment).
 #
 # Keep this file ASCII-only: Windows PowerShell 5.1 misreads non-ASCII characters
 # in files without a BOM.
@@ -13,6 +13,8 @@ $script:PowerPlatformResource = 'https://service.powerapps.com/'
 $script:BapBase = 'https://api.bap.microsoft.com/providers/Microsoft.BusinessAppPlatform'
 $script:StateFile = Join-Path (Split-Path $PSScriptRoot -Parent) 'my-alm-setup.json'
 $script:DeveloperEnvironmentLimit = 3
+# Public client used for username/password sign-ins (the Azure CLI's own app ID)
+$script:AzureCliClientId = '04b07795-8ddb-461a-bbee-02f9e1bf7b46'
 
 # Web request progress bars leave blank lines behind in the output and slow requests down
 $ProgressPreference = 'SilentlyContinue'
@@ -63,41 +65,43 @@ function Test-WorkshopTools
         Write-Hint "Install it from https://aka.ms/installazurecliwindows then open a NEW PowerShell window"
         $ok = $false
     }
-    if (Get-Command pac -ErrorAction SilentlyContinue)
-    {
-        Write-Ok "Power Platform CLI (pac) is installed"
-        # Old versions break as Microsoft's APIs change, so nudge people to stay current
-        $installed = $null
-        if ((pac 2>&1 | Out-String) -match 'Version:\s*(\d+\.\d+\.\d+)') { $installed = [version]$Matches[1] }
-        $latest = $null
-        try
-        {
-            $versions = (Invoke-RestMethod -Uri 'https://api.nuget.org/v3-flatcontainer/microsoft.powerapps.cli/index.json' -ErrorAction Stop).versions
-            $latest = $versions | Where-Object { $_ -match '^\d+\.\d+\.\d+$' } | ForEach-Object { [version]$_ } | Sort-Object | Select-Object -Last 1
-        }
-        catch { }
-        if ($installed -and $latest -and $installed -lt $latest)
-        {
-            Write-Warn "Your Power Platform CLI is version $installed; the latest is $latest"
-            Write-Hint "Update it with: pac install latest"
-        }
-    }
-    else
-    {
-        Write-Bad "Power Platform CLI (pac) is not installed"
-        Write-Hint "Install it from https://learn.microsoft.com/power-platform/developer/cli/introduction then open a NEW PowerShell window"
-        $ok = $false
-    }
     return $ok
 }
 
+# Runs the Azure CLI and returns its output, or $null if it failed. Use this for every az call:
+# under Windows PowerShell 5.1 with $ErrorActionPreference = 'Stop', anything az writes to
+# stderr (even a harmless warning) is turned into a script-ending error, 2>$null or not.
+function Invoke-Az
+{
+    $ErrorActionPreference = 'Continue'
+    $out = & az @args 2>$null
+    if ($LASTEXITCODE -ne 0) { return $null }
+    return $out
+}
+
+# Same, parsed from JSON (az ... -o json)
+function Invoke-AzJson
+{
+    $out = Invoke-Az @args
+    if (-not $out) { return $null }
+    return (($out | Out-String) | ConvertFrom-Json)
+}
+
 # Signs in to Azure CLI (tenant-level, no subscription needed) and returns the account.
-# If already signed in, reuses that session unless -SwitchAccount is passed.
+# Reuses a saved session unless -SwitchAccount is passed, or the session has expired
+# (for example Microsoft wants MFA again) - then it opens the sign-in page.
 function Connect-WorkshopAzure([switch]$SwitchAccount, [string]$TenantId, [switch]$UseDeviceCode)
 {
+    $ErrorActionPreference = 'Continue'
     $account = $null
-    if (-not $SwitchAccount) { $account = az account show -o json 2>$null | ConvertFrom-Json }
+    if (-not $SwitchAccount) { $account = Invoke-AzJson account show -o json }
     if ($account -and $TenantId -and $account.tenantId -ne $TenantId) { $account = $null }
+    if ($account -and -not (Invoke-Az account get-access-token --resource https://graph.microsoft.com --query accessToken -o tsv))
+    {
+        Write-Step "Your saved sign-in for $($account.user.name) has expired."
+        if (-not $TenantId) { $TenantId = $account.tenantId }
+        $account = $null
+    }
 
     if (-not $account)
     {
@@ -112,7 +116,7 @@ function Connect-WorkshopAzure([switch]$SwitchAccount, [string]$TenantId, [switc
         # An account that can see several tenants must pick one explicitly
         if (-not $TenantId)
         {
-            $tenants = @(az account tenant list -o json 2>$null | ConvertFrom-Json | ForEach-Object { $_ })
+            $tenants = @(Invoke-AzJson account tenant list -o json | ForEach-Object { $_ })
             if ($tenants.Count -gt 1)
             {
                 Write-Host ""
@@ -130,7 +134,7 @@ function Connect-WorkshopAzure([switch]$SwitchAccount, [string]$TenantId, [switc
                     [int]::TryParse($answer, [ref]$choice) | Out-Null
                 }
                 $picked = $tenants[$choice - 1].tenantId
-                $account = az account show -o json 2>$null | ConvertFrom-Json
+                $account = Invoke-AzJson account show -o json
                 if (-not $account -or $account.tenantId -ne $picked)
                 {
                     $loginArgs = @('login', '--allow-no-subscriptions', '--only-show-errors', '-o', 'none', '--tenant', $picked)
@@ -140,37 +144,10 @@ function Connect-WorkshopAzure([switch]$SwitchAccount, [string]$TenantId, [switc
                 }
             }
         }
-        $account = az account show -o json 2>$null | ConvertFrom-Json
+        $account = Invoke-AzJson account show -o json
     }
     if (-not $account) { throw "Azure CLI is not signed in." }
     return $account
-}
-
-function Get-PacTenantId
-{
-    # pac always exits 0, so read the output instead of $LASTEXITCODE
-    $who = pac auth who 2>&1 | Out-String
-    if ($who -match 'Tenant Id:\s+([0-9a-fA-F-]{36})') { return $Matches[1] }
-    return $null
-}
-
-# Makes sure PAC CLI is signed in to the same tenant as Azure CLI.
-function Connect-WorkshopPac([string]$TenantId, [switch]$UseDeviceCode)
-{
-    $pacTenant = Get-PacTenantId
-    if ($pacTenant -and $pacTenant -eq $TenantId) { return $true }
-
-    if ($pacTenant) { Write-Step "PAC CLI is signed in to a different tenant ($pacTenant). Signing in again..." }
-    else { Write-Step "Opening the Microsoft sign-in page for the Power Platform CLI..." }
-    Write-Hint "Sign in with the SAME account you just used."
-
-    $pacArgs = @('auth', 'create', '--tenant', $TenantId)
-    if ($UseDeviceCode) { $pacArgs += '--deviceCode' }
-    $out = & pac @pacArgs 2>&1 | Out-String
-    if ($out -match 'Error:') { Write-Hint ($out.Trim()) }
-
-    $pacTenant = Get-PacTenantId
-    return ($pacTenant -eq $TenantId)
 }
 
 # ---------------------------------------------------------------------------
@@ -178,14 +155,15 @@ function Connect-WorkshopPac([string]$TenantId, [switch]$UseDeviceCode)
 # ---------------------------------------------------------------------------
 function Get-WorkshopToken($resource)
 {
-    $token = az account get-access-token --resource $resource --query accessToken -o tsv 2>$null
-    if (-not $token) { throw "Could not get an access token for $resource. Try signing in again with -SwitchAccount." }
+    $token = Invoke-Az account get-access-token --resource $resource --query accessToken -o tsv
+    if (-not $token) { throw "Could not get an access token for $resource. Your sign-in may have expired - run the script again, or add -SwitchAccount." }
     return $token
 }
 
-function Invoke-WorkshopRest($Method, $Uri, $Resource, $Body = $null, $ExtraHeaders = @{})
+function Invoke-WorkshopRest($Method, $Uri, $Resource, $Body = $null, $ExtraHeaders = @{}, $Token = $null)
 {
-    $headers = @{ Authorization = "Bearer $(Get-WorkshopToken $Resource)"; Accept = 'application/json' }
+    if (-not $Token) { $Token = Get-WorkshopToken $Resource }
+    $headers = @{ Authorization = "Bearer $Token"; Accept = 'application/json' }
     foreach ($k in $ExtraHeaders.Keys) { $headers[$k] = $ExtraHeaders[$k] }
     $params = @{ Method = $Method; Uri = $Uri; Headers = $headers; ErrorAction = 'Stop' }
     if ($null -ne $Body)
@@ -233,20 +211,16 @@ function Get-MyEligibleRoleIds($userId)
     catch { return $null }
 }
 
-function Get-TenantShortName
-{
-    $org = Invoke-Graph GET "/organization?`$select=verifiedDomains"
-    $initial = $org.value[0].verifiedDomains | Where-Object { $_.isInitial } | Select-Object -First 1
-    return ($initial.name -split '\.')[0]
-}
-
 # ---------------------------------------------------------------------------
 # Power Platform
 # ---------------------------------------------------------------------------
 # Environments the signed-in user can see, flattened to the fields the scripts use.
-function Get-MyEnvironments
+# -Admin lists every environment in the tenant (needs an admin), including ones owned by the
+# hotfix service account. (Listing AS a brand-new service account fails with CRMRequestFailed 404.)
+function Get-MyEnvironments([switch]$Admin)
 {
-    $r = Invoke-WorkshopRest GET "$($script:BapBase)/environments?api-version=2020-10-01" $script:PowerPlatformResource
+    $scope = if ($Admin) { '/scopes/admin' } else { '' }
+    $r = Invoke-WorkshopRest GET "$($script:BapBase)$scope/environments?api-version=2020-10-01" $script:PowerPlatformResource
     return @($r.value | ForEach-Object {
         $p = $_.properties
         $owner = $null
@@ -273,18 +247,11 @@ function Get-TenantPowerPlatformSettings
     catch { return $null }
 }
 
-# Dataverse domain (the part before .crm.dynamics.com). Lowercase letters and digits only.
-function Get-EnvironmentDomain($tenantShort, $prefix, $suffix)
-{
-    $clean = { param($s, $max) $v = ($s.ToLower() -replace '[^a-z0-9]', ''); if ($v.Length -gt $max) { $v.Substring(0, $max) } else { $v } }
-    return (& $clean $tenantShort 8) + (& $clean $prefix 5) + (& $clean $suffix 7)
-}
-
 # Creates a Developer environment (without a database yet - add one with Add-DataverseDatabase)
 # and returns its ID. Uses the Power Platform API directly because 'pac admin create --type Developer'
 # fails with "macroRegion '<region>' is not valid" (PAC CLI 2.4 through 2.12, September 2026): the
 # service now wants a macroRegion instead of a location for Developer environments.
-function New-DeveloperEnvironment($displayName, $region)
+function New-DeveloperEnvironment($displayName, $region, $Token = $null)
 {
     # Only unitedstates -> north-america is confirmed; other regions try the old form first
     $macroRegions = @{ unitedstates = 'north-america' }
@@ -299,7 +266,7 @@ function New-DeveloperEnvironment($displayName, $region)
         foreach ($k in $where.Keys) { $body[$k] = $where[$k] }
         try
         {
-            $created = Invoke-WorkshopRest POST "$($script:BapBase)/environments?api-version=2020-10-01" $script:PowerPlatformResource $body
+            $created = Invoke-WorkshopRest POST "$($script:BapBase)/environments?api-version=2020-10-01" $script:PowerPlatformResource $body -Token $Token
             return $created.name
         }
         catch { $lastError = Get-ErrorText $_ }
@@ -314,22 +281,22 @@ function Rename-WorkshopEnvironment($environmentId, $newName)
 
 # Adds a Dataverse database to an environment that doesn't have one (the "Add Dataverse"
 # button in the admin center; same call as New-AdminPowerAppCdsDatabase). Runs in the background.
-function Add-DataverseDatabase($environmentId)
+function Add-DataverseDatabase($environmentId, $Token = $null)
 {
     $body = @{ baseLanguage = 1033; currency = @{ code = 'USD' }; templates = @() }
-    Invoke-WorkshopRest POST "$($script:BapBase)/environments/$($environmentId)/provisionInstance?api-version=2018-01-01" $script:PowerPlatformResource $body | Out-Null
+    Invoke-WorkshopRest POST "$($script:BapBase)/environments/$($environmentId)/provisionInstance?api-version=2018-01-01" $script:PowerPlatformResource $body -Token $Token | Out-Null
 }
 
 # Waits until an environment (matched by ID if given, otherwise by display name) has a ready Dataverse database.
 # -DatabaseRequested: a database was just requested, so don't treat "no database yet" as a failure.
-function Wait-EnvironmentReady($displayName, $timeoutMinutes = 20, $EnvironmentId = $null, [switch]$DatabaseRequested)
+function Wait-EnvironmentReady($displayName, $timeoutMinutes = 20, $EnvironmentId = $null, [switch]$DatabaseRequested, [switch]$Admin)
 {
     $deadline = (Get-Date).AddMinutes($timeoutMinutes)
     $noDatabaseChecks = 0
     while ((Get-Date) -lt $deadline)
     {
-        if ($EnvironmentId) { $env = Get-MyEnvironments | Where-Object { $_.Id -eq $EnvironmentId } | Select-Object -First 1 }
-        else { $env = Get-MyEnvironments | Where-Object { $_.DisplayName -eq $displayName } | Select-Object -First 1 }
+        if ($EnvironmentId) { $env = Get-MyEnvironments -Admin:$Admin | Where-Object { $_.Id -eq $EnvironmentId } | Select-Object -First 1 }
+        else { $env = Get-MyEnvironments -Admin:$Admin | Where-Object { $_.DisplayName -eq $displayName } | Select-Object -First 1 }
         if ($env -and $env.Url -and $env.State -eq 'Ready' -and $env.Provisioning -eq 'Succeeded') { return $env }
         # Finished provisioning but still no database after a few checks means it never will - stop waiting
         if ($env -and $env.Provisioning -match 'Failed') { throw "Environment '$($env.DisplayName)' is in a failed state ($($env.Provisioning)). Check it at https://admin.powerplatform.microsoft.com." }
@@ -354,7 +321,7 @@ function Add-SPNToDataverseEnvironment($envUrl, $appId, $fallbackUpn = "", $fall
     $resource = $envUrl.TrimEnd('/')
 
     $workingToken = $null
-    $myToken = az account get-access-token --resource $resource --query accessToken -o tsv 2>$null
+    $myToken = Invoke-Az account get-access-token --resource $resource --query accessToken -o tsv
     if ($myToken)
     {
         try
@@ -403,46 +370,6 @@ function Add-SPNToDataverseEnvironment($envUrl, $appId, $fallbackUpn = "", $fall
     return $sysUserId
 }
 
-# Assigns a regular Entra ID user as System Administrator in a Dataverse environment.
-# PAC CLI provisions the user; the REST API (as $fallbackUpn) finishes the role if PAC fails on that step.
-function Add-UserToDataverseEnvironment($envUrl, $userUpn, $fallbackUpn, $fallbackPassword, $tenantId)
-{
-    $resource = $envUrl.TrimEnd('/')
-
-    $pacOutput = pac admin assign-user --environment $resource --user $userUpn --role "System Administrator" 2>&1
-    if (-not ($pacOutput -match "Error:"))
-    {
-        Write-Step "  Role assigned via PAC CLI"
-        return
-    }
-    if (-not ($pacOutput -match "Successfully assigned user"))
-    {
-        throw "pac admin assign-user failed: $(($pacOutput | Where-Object { "$_" -match 'Error:' }) -join ' ')"
-    }
-
-    Write-Step "  User added but PAC CLI could not assign the role - finishing via the Dataverse API..."
-    $token = Get-PasswordToken $resource $fallbackUpn $fallbackPassword $tenantId
-    $headers = @{
-        Authorization      = "Bearer $token"
-        Accept             = "application/json"
-        "OData-MaxVersion" = "4.0"
-        "OData-Version"    = "4.0"
-        "Content-Type"     = "application/json"
-    }
-
-    $dvUser = $null
-    $attempts = 0
-    while (-not $dvUser -and $attempts -lt 6)
-    {
-        $result = Invoke-RestMethod -Uri "$resource/api/data/v9.2/systemusers?`$filter=domainname eq '$userUpn'&`$select=systemuserid" -Headers $headers -ErrorAction Stop
-        if ($result.value.Count -gt 0) { $dvUser = $result.value[0] }
-        else { $attempts++; Write-Step "  Waiting for the user record to appear..."; Start-Sleep -Seconds 10 }
-    }
-    if (-not $dvUser) { throw "User record for $userUpn not found in $envUrl after waiting" }
-
-    Grant-SystemAdministrator $resource $headers $dvUser.systemuserid
-}
-
 function Grant-SystemAdministrator($resource, $headers, $sysUserId)
 {
     $roles = Invoke-RestMethod -Uri "$resource/api/data/v9.2/roles?`$filter=name eq 'System Administrator' and _parentroleid_value eq null&`$select=roleid" -Headers $headers -ErrorAction Stop
@@ -459,17 +386,52 @@ function Grant-SystemAdministrator($resource, $headers, $sysUserId)
 }
 
 # Username/password token for an account with no MFA (the hotfix service account).
-function Get-PasswordToken($resource, $upn, $password, $tenantId)
+function Get-PasswordToken($resource, $upn, $password, $tenantId, $ClientId = "1950a258-227b-4e31-a9cf-717495945fc2")
 {
     $tokenBody = @{
         grant_type = "password"
         username   = $upn
         password   = $password
-        client_id  = "1950a258-227b-4e31-a9cf-717495945fc2"
+        client_id  = $ClientId
         scope      = "$resource/.default"
     }
     $tokenResponse = Invoke-RestMethod -Uri "https://login.microsoftonline.com/$tenantId/oauth2/v2.0/token" -Method POST -Body $tokenBody -ErrorAction Stop
     return $tokenResponse.access_token
+}
+
+# Adds an Entra ID user to a Dataverse environment as System Administrator.
+# The user is synced in with the Power Platform admin "addUser" call (needs you to be an admin):
+# a user record created directly in Dataverse stays DISABLED and can't be given a role.
+# The role is then assigned with $token, which must have admin rights in the environment
+# (the hotfix service account owns those environments).
+function Add-EntraUserToDataverse($envUrl, $envId, $userObjectId, $token)
+{
+    $resource = $envUrl.TrimEnd('/')
+    Invoke-WorkshopRest POST "$($script:BapBase)/scopes/admin/environments/$envId/addUser?api-version=2020-10-01" $script:PowerPlatformResource @{ ObjectId = $userObjectId } | Out-Null
+
+    $headers = @{
+        Authorization      = "Bearer $token"
+        Accept             = "application/json"
+        "OData-MaxVersion" = "4.0"
+        "OData-Version"    = "4.0"
+        "Content-Type"     = "application/json"
+    }
+    $dvUser = $null
+    for ($i = 0; $i -lt 12 -and -not $dvUser; $i++)
+    {
+        $r = Invoke-RestMethod -Uri "$resource/api/data/v9.2/systemusers?`$filter=azureactivedirectoryobjectid eq $userObjectId&`$select=systemuserid,isdisabled" -Headers $headers -ErrorAction Stop
+        $dvUser = $r.value | Where-Object { -not $_.isdisabled } | Select-Object -First 1
+        if (-not $dvUser) { Write-Step "  Waiting for the user to finish syncing..."; Start-Sleep -Seconds 10 }
+    }
+    if (-not $dvUser) { throw "User $userObjectId didn't appear as an enabled user in $envUrl" }
+    Grant-SystemAdministrator $resource $headers $dvUser.systemuserid
+}
+
+# $true/$false for Microsoft's tenant-wide "security defaults" (which enforce MFA), $null if unreadable.
+function Get-SecurityDefaultsEnabled
+{
+    try { return [bool](Invoke-Graph GET "/policies/identitySecurityDefaultsEnforcementPolicy").isEnabled }
+    catch { return $null }
 }
 
 # ---------------------------------------------------------------------------
@@ -516,49 +478,3 @@ function Get-MyAdoOrganizations($tenantId)
     return $result
 }
 
-# Returns the org name to use. Prompts when there is a choice, and waits for the attendee
-# to create one when there is none.
-function Select-AdoOrganization($tenantId, [string]$Preferred)
-{
-    while ($true)
-    {
-        $orgs = @(Get-MyAdoOrganizations $tenantId)
-        $mine = @($orgs | Where-Object { $_.InThisTenant })
-
-        if ($Preferred)
-        {
-            $match = $mine | Where-Object { $_.Name -eq $Preferred }
-            if ($match)
-            {
-                Write-Ok "Using Azure DevOps org: $($match.Name)"
-                return $match.Name
-            }
-            Write-Warn "Azure DevOps org '$Preferred' is not one of your orgs in this tenant - ignoring it"
-            $Preferred = $null
-        }
-
-        if ($mine.Count -eq 1)
-        {
-            Write-Ok "Using Azure DevOps org: $($mine[0].Name)"
-            return $mine[0].Name
-        }
-        if ($mine.Count -gt 1)
-        {
-            Write-Host ""
-            Write-Host "  You belong to more than one Azure DevOps org in this tenant. Which one should we use?"
-            for ($i = 0; $i -lt $mine.Count; $i++) { Write-Host ("    [{0}] {1}" -f ($i + 1), $mine[$i].Name) }
-            $choice = 0
-            while ($choice -lt 1 -or $choice -gt $mine.Count)
-            {
-                [int]::TryParse((Read-Host "  Enter a number"), [ref]$choice) | Out-Null
-            }
-            return $mine[$choice - 1].Name
-        }
-
-        Write-Bad "You don't have an Azure DevOps org connected to this tenant yet."
-        foreach ($o in $orgs) { Write-Hint "(Found '$($o.Name)', but it belongs to a different tenant.)" }
-        Write-Hint "Follow 'D. Create your Azure DevOps organization' in 'Part 1 - Set Up\README.md'."
-        Write-Hint "Make sure your work account is added to the org as a member."
-        Read-Host "  Press Enter once that's done"
-    }
-}
