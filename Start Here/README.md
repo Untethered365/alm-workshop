@@ -11,8 +11,8 @@ The setup does the Power Platform and Azure plumbing for you. It deliberately le
 
 > **This folder is pre-work. Do Part 1, then stop.**
 >
-> - **Live workshop** (for example at a conference): finish Part 1 before the day, then you're done. There's nothing more to do until the workshop itself, where we'll take it from there together.
-> - **Online course:** once Part 1 is done, continue with the next lesson in your course. **No access to the lessons yet? Stop after Part 1** until you do.
+> When Part 1 is done: **Continue the remaining steps in the Heartbeat app.** If you're taking this workshop live and you're setting this up prior to the workshop, you've finished setup. Wait until the day of your workshop to continue.
+>
 > - **Part 2 (hotfix)** is only for the hotfix section of the course. Leave it until a lesson tells you to run it.
 >
 > Don't start on the rest of this repository (the `Samples` folder) on your own. The lessons walk you through it.

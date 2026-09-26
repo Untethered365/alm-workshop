@@ -250,10 +250,9 @@ foreach ($e in $workshopEnvs)
     Write-Host ("    {0,-9} {1}" -f '', $e.Id)
 }
 Write-Host ""
-Write-Host "  Setup is complete - you can stop here." -ForegroundColor Green
-Write-Host "    Live workshop: nothing more to do until the day of the workshop."
-Write-Host "    Online course: continue with the next lesson in your course."
-Write-Host "    (No access to the lessons yet? Stop here until you do.)"
+Write-Host "  Setup is complete. Continue the remaining steps in the Heartbeat app." -ForegroundColor Green
+Write-Host "  If you're taking this workshop live and you're setting this up prior to the workshop,"
+Write-Host "  you've finished setup. Wait until the day of your workshop to continue."
 Write-Host ""
 Write-Host "  Everything above is also saved in:" -ForegroundColor Yellow
 Write-Host "    $($script:StateFile)" -ForegroundColor Yellow
