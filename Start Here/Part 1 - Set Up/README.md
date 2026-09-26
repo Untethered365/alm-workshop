@@ -125,6 +125,15 @@ It does **not** touch Azure DevOps. When it finishes, go to the workshop lessons
 | `-SwitchAccount` | You signed in with the wrong account |
 | `-UseDeviceCode` | The browser sign-in won't open |
 
+## You're done - stop here
+
+When `Setup-Core.ps1` finishes with **Done - values for the lessons**, your setup is complete. Keep `my-alm-setup.json` safe; you'll need its values in the lessons.
+
+- **Live workshop:** that's everything until the day of the workshop.
+- **Online course:** continue with the lessons in [Heartbeat](https://app.heartbeat.chat/untethered365). No access yet? Stop here and wait for your invitation.
+
+Don't go on to Part 2 or the rest of the repository until a lesson tells you to.
+
 ---
 
 ## Troubleshooting

@@ -250,7 +250,11 @@ foreach ($e in $workshopEnvs)
     Write-Host ("    {0,-9} {1}" -f '', $e.Id)
 }
 Write-Host ""
-Write-Host "  Next: follow the workshop lessons, starting with creating your Azure DevOps project." -ForegroundColor Yellow
+Write-Host "  Setup is complete - you can stop here." -ForegroundColor Green
+Write-Host "    Live workshop: nothing more to do until the day of the workshop."
+Write-Host "    Online course: continue with the lessons in Heartbeat (https://app.heartbeat.chat/untethered365)."
+Write-Host "    (No Heartbeat access yet? Stop here and wait for your invitation.)"
+Write-Host ""
 Write-Host "  Everything above is also saved in:" -ForegroundColor Yellow
 Write-Host "    $($script:StateFile)" -ForegroundColor Yellow
 Write-Host "  Keep that file private - the secret gives full access to your environments." -ForegroundColor Yellow

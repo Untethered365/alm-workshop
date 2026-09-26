@@ -1,8 +1,10 @@
 # Advanced ALM for Power Platform
 
-## Attending the workshop? Start here
+## New here? Go to Start Here first
 
-Go to the **[Start Here](Start%20Here/README.md)** folder first. It walks you through setting up your own Power Platform environments (DEV, TEST and PROD) and Azure DevOps project for the workshop, step by step. You can follow it yourself, or open it in VS Code and let GitHub Copilot or Claude guide you.
+Everyone starts in the **[Start Here](Start%20Here/README.md)** folder. It's the setup you do **before** your course or workshop begins: your own Power Platform environments (DEV, TEST and PROD) and the app registration your pipelines will use. You can follow it yourself, or open it in VS Code and let GitHub Copilot or Claude guide you.
+
+**Don't use anything else in this repository yet.** The pipeline files in `Samples` are used during the lessons, which live in the [Heartbeat app](https://app.heartbeat.chat/untethered365). The lessons tell you when and how to use them.
 
 ---
 

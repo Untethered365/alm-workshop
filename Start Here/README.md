@@ -9,6 +9,14 @@ In this workshop you'll build a real ALM (Application Lifecycle Management) setu
 
 The setup does the Power Platform and Azure plumbing for you. It deliberately leaves Azure DevOps (the project, service connections and variable groups) for you to build in the lessons, because that's the skill this workshop teaches.
 
+> **This folder is pre-work. Do Part 1, then stop.**
+>
+> - **Live workshop** (for example at a conference): finish Part 1 before the day, then you're done. There's nothing more to do until the workshop itself, where we'll take it from there together.
+> - **Online course:** once Part 1 is done, continue with the lessons in [Heartbeat](https://app.heartbeat.chat/untethered365). **No Heartbeat access yet? Stop after Part 1** and wait for your invitation.
+> - **Part 2 (hotfix)** is only for the hotfix section of the course. Leave it until a lesson tells you to run it.
+>
+> Don't start on the rest of this repository (the `Samples` folder) on your own. The lessons walk you through it.
+
 ## Recommended: let an AI assistant walk you through it
 
 You'll find this much easier with an AI assistant beside you in VS Code. It knows these steps, tells you what to do next, and explains any error you hit.

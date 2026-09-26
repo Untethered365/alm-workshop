@@ -8,7 +8,7 @@ Follow these files, in this order. They are the source of truth. Don't invent ot
 
 1. `README.md`: picking a path, installing the tools, how sign-in works
 2. `Part 1 - Set Up/README.md`: creating their own tenant (Path 2), the readiness check, the setup script, troubleshooting
-3. `Part 2 - Hotfix (For later)/README.md`: **only** if the attendee says they're doing the hotfix course. Otherwise don't bring it up.
+3. `Part 2 - Hotfix (For later)/README.md`: **only** when the attendee says a hotfix lesson told them to run it. Otherwise don't bring it up.
 
 If something isn't covered in these files, say so plainly and suggest they ask the workshop instructor. Don't improvise a workaround.
 
@@ -42,6 +42,15 @@ If something isn't covered in these files, say so plainly and suggest they ask t
 2. Check the **Troubleshooting** table in the matching README.
 3. Remind them that the setup scripts are safe to run again once the problem is fixed.
 4. If a permission is missing in their company tenant, point them to the "Copy this to your IT admin" message the readiness check prints, or suggest switching to Path 2 (their own tenant).
+
+## Where the attendee stops
+
+This folder is **pre-work**. When `Setup-Core.ps1` finishes successfully, **the attendee is done.** Tell them so clearly:
+
+- **Live workshop:** there's nothing more to do until the day of the workshop.
+- **Online course:** they continue with the lessons in Heartbeat (https://app.heartbeat.chat/untethered365). If they don't have Heartbeat access yet, they should stop and wait for their invitation.
+
+Don't lead them into the rest of the repository (the `Samples` folder), the Azure DevOps steps, or Part 2 (hotfix). The lessons cover those, in order. If they ask to keep going anyway, explain that the lessons walk them through it and suggest they wait for them.
 
 ## What the setup does and doesn't do
 
