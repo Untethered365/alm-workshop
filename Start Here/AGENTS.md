@@ -48,7 +48,7 @@ If something isn't covered in these files, say so plainly and suggest they ask t
 This folder is **pre-work**. When `Setup-Core.ps1` finishes successfully, **the attendee is done.** Tell them so clearly:
 
 - **Live workshop:** there's nothing more to do until the day of the workshop.
-- **Online course:** they continue with the lessons in Heartbeat (https://app.heartbeat.chat/untethered365). If they don't have Heartbeat access yet, they should stop and wait for their invitation.
+- **Online course:** they continue with the next lesson in their course. If they don't have access to the course lessons yet, they should stop and wait until they do.
 
 Don't lead them into the rest of the repository (the `Samples` folder), the Azure DevOps steps, or Part 2 (hotfix). The lessons cover those, in order. If they ask to keep going anyway, explain that the lessons walk them through it and suggest they wait for them.
 

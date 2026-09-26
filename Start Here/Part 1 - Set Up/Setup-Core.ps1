@@ -252,8 +252,8 @@ foreach ($e in $workshopEnvs)
 Write-Host ""
 Write-Host "  Setup is complete - you can stop here." -ForegroundColor Green
 Write-Host "    Live workshop: nothing more to do until the day of the workshop."
-Write-Host "    Online course: continue with the lessons in Heartbeat (https://app.heartbeat.chat/untethered365)."
-Write-Host "    (No Heartbeat access yet? Stop here and wait for your invitation.)"
+Write-Host "    Online course: continue with the next lesson in your course."
+Write-Host "    (No access to the lessons yet? Stop here until you do.)"
 Write-Host ""
 Write-Host "  Everything above is also saved in:" -ForegroundColor Yellow
 Write-Host "    $($script:StateFile)" -ForegroundColor Yellow

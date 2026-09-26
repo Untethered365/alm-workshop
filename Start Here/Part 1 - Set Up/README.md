@@ -130,7 +130,7 @@ It does **not** touch Azure DevOps. When it finishes, go to the workshop lessons
 When `Setup-Core.ps1` finishes with **Done - values for the lessons**, your setup is complete. Keep `my-alm-setup.json` safe; you'll need its values in the lessons.
 
 - **Live workshop:** that's everything until the day of the workshop.
-- **Online course:** continue with the lessons in [Heartbeat](https://app.heartbeat.chat/untethered365). No access yet? Stop here and wait for your invitation.
+- **Online course:** continue with the next lesson in your course. No access to the lessons yet? Stop here until you do.
 
 Don't go on to Part 2 or the rest of the repository until a lesson tells you to.
 
