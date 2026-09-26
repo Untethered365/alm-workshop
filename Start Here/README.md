@@ -5,7 +5,17 @@ In this workshop you'll build a real ALM (Application Lifecycle Management) setu
 **What you'll end up with:**
 - Three Dataverse environments: DEV, TEST and PROD
 - An app registration (service principal) your pipelines use to deploy
-- An Azure DevOps project, with a ready-made connection to each environment
+- An Azure DevOps organization, ready for the lessons
+
+The setup does the Power Platform and Azure plumbing for you. It deliberately leaves Azure DevOps (the project, service connections and variable groups) for you to build in the lessons, because that's the skill this workshop teaches.
+
+> **This folder is pre-work. Do Part 1, then stop.**
+>
+> When Part 1 is done: **Continue the remaining steps in the Heartbeat app.** If you're taking this workshop live and you're setting this up prior to the workshop, you've finished setup. Wait until the day of your workshop to continue.
+>
+> - **Part 2 (hotfix)** is only for the hotfix section of the course. Leave it until a lesson tells you to run it.
+>
+> Don't start on the rest of this repository (the `Samples` folder) on your own. The lessons walk you through it.
 
 ## Recommended: let an AI assistant walk you through it
 
@@ -38,21 +48,27 @@ Either way, you'll finish with the same setup.
 
 ## Install the tools
 
-You need a Windows PC with these two free tools. Install both, then **open a new PowerShell window** so it picks them up.
+You need a Windows PC with the free **Azure CLI**. Install it, then **open a new PowerShell window** so it picks it up.
 
 | Tool | Install |
 |---|---|
 | Azure CLI | [Download the installer](https://aka.ms/installazurecliwindows), or run `winget install -e --id Microsoft.AzureCLI` |
-| Power Platform CLI | [Download the installer](https://aka.ms/PowerAppsCLI) (the file is called `powerapps-cli-1.0.msi`; it always installs the latest version) |
 
-Check they're installed:
+Check it's installed:
 
 ```powershell
 az --version
-pac
 ```
 
-If PowerShell blocks the scripts with a message about execution policy, run this once:
+The workshop lessons also use **VS Code** and **Git**. The first lesson lists them.
+
+**If you downloaded the ZIP**, Windows marks every file as "from the internet" and PowerShell will refuse to run the scripts (*"...is not digitally signed. You cannot run this script on the current system."*). Remove that mark once. In a PowerShell window opened in the `Start Here` folder, run:
+
+```powershell
+Get-ChildItem -Recurse | Unblock-File
+```
+
+If PowerShell still blocks the scripts with a message about execution policy, also run this once:
 
 ```powershell
 Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
@@ -83,7 +99,7 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 
 ## Signing in
 
-The scripts never ask for your password. They open the normal Microsoft sign-in page in your browser. You'll sign in **twice** the first time (once for Azure CLI, once for the Power Platform CLI). Use the same account both times.
+The scripts never ask for your password. They open the normal Microsoft sign-in page in your browser. You sign in once, with your work account, and the scripts reuse that sign-in.
 
 - The browser window sometimes opens **behind** PowerShell. Check your taskbar.
 - If your account can see more than one tenant, the script asks you to pick one.

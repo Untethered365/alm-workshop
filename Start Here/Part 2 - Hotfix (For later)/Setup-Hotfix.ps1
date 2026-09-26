@@ -2,13 +2,16 @@
 #
 # Everyone can own at most 3 Developer environments, and the core workshop uses
 # all three (DEV, TEST, PROD). So the two hotfix environments are owned by a
-# separate SERVICE ACCOUNT that this script creates:
+# separate SERVICE ACCOUNT that this script creates. The hotfix pipeline also signs
+# in as that account with a username and password, so it must not require MFA.
 #
 #   1. Service account (Entra ID user) with a Power Apps Developer Plan license
-#   2. HFXDEV and HFXTEST Developer environments, owned by the service account
-#   3. YOU as System Administrator in both, so you can work in them
-#   4. Your pipeline service principal (from the core setup) as System Administrator in both
-#   5. Azure DevOps service connections for both
+#   2. HFXDEV and HFXTEST Developer environments, created BY the service account
+#      (so they count against its 3 slots, not yours)
+#   3. YOU and your pipeline service principal as System Administrator in both
+#
+# It does NOT create Azure DevOps service connections or variable groups - you
+# build those in the hotfix lessons. It prints the values you'll need.
 #
 # Run Setup-Core.ps1 in the 'Part 1 - Set Up' folder first. Safe to run again.
 
@@ -29,12 +32,11 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot '..\Part 1 - Set Up\WorkshopCommon.ps1')
 
 $envSuffixes = @('HFXDEV', 'HFXTEST')
+$mfaVideo = 'https://youtu.be/JyYZGscr5lU'
 
 # ---------------------------------------------------------------------------
-Write-Section "1. Tools, sign-in and core setup"
+Write-Section "1. Sign-in and core setup"
 # ---------------------------------------------------------------------------
-if (-not (Test-WorkshopTools)) { exit 1 }
-
 if (-not (Test-Path $script:StateFile))
 {
     Write-Bad "Can't find my-alm-setup.json. Run Setup-Core.ps1 in the 'Part 1 - Set Up' folder first."
@@ -55,29 +57,20 @@ $account = Connect-WorkshopAzure -SwitchAccount:$SwitchAccount -TenantId $state.
 $tenantId = $account.tenantId
 $upn = $account.user.name
 Write-Ok "Signed in as $upn (tenant $tenantId)"
-
-if (-not (Connect-WorkshopPac -TenantId $tenantId -UseDeviceCode:$UseDeviceCode))
-{
-    Write-Bad "Power Platform CLI isn't signed in to the same tenant. Run: pac auth create --tenant $tenantId"
-    exit 1
-}
-Write-Ok "Power Platform CLI is signed in to the same tenant"
 Write-Ok "Found your core setup (service principal $($state.AppName))"
 
 $prefix = $state.Prefix
+$me = Invoke-Graph GET "/me?`$select=id"
 $activeRoles = @(Get-MyActiveRoleIds)
 $R = $script:RoleIds
-$canCreateUsers = ($activeRoles -contains $R.GlobalAdministrator) -or ($activeRoles -contains $R.UserAdministrator)
-$isPowerPlatformAdmin = ($activeRoles -contains $R.GlobalAdministrator) -or ($activeRoles -contains $R.PowerPlatformAdministrator)
-if (-not $canCreateUsers -or -not $isPowerPlatformAdmin)
+if (-not (($activeRoles -contains $R.GlobalAdministrator) -or ($activeRoles -contains $R.UserAdministrator)))
 {
-    Write-Bad "The hotfix course needs you to create a user and environments for that user."
-    if (-not $canCreateUsers) { Write-Hint "Missing: 'User Administrator' role in Entra ID" }
-    if (-not $isPowerPlatformAdmin) { Write-Hint "Missing: 'Power Platform Administrator' role" }
+    Write-Bad "The hotfix course needs you to create a user account (the service account)."
+    Write-Hint "Missing: 'User Administrator' role in Entra ID (or Global Administrator)."
     Write-Hint "Run Test-Readiness.ps1 in the 'Part 1 - Set Up' folder for a message you can send your IT admin."
     exit 1
 }
-Write-Ok "You have the roles needed for the hotfix course"
+Write-Ok "You can create the service account"
 
 # ---------------------------------------------------------------------------
 Write-Section "2. Service account"
@@ -102,7 +95,6 @@ if ($svcUser)
     Write-Ok "Service account $svcUpn already exists"
     if (-not $state.ServiceAccountPassword)
     {
-        # Needed to act as the service account inside the environments it owns
         Write-Step "No saved password for it - setting a new one..."
         $state.ServiceAccountPassword = New-ServiceAccountPassword
         Invoke-Graph PATCH "/users/$($svcUser.id)" @{ passwordProfile = @{ password = $state.ServiceAccountPassword; forceChangePasswordNextSignIn = $false } } | Out-Null
@@ -125,6 +117,7 @@ else
     $newAccount = $true
 }
 $state.ServiceAccount = $svcUpn
+$state.ServiceAccountObjectId = $svcUser.id
 Save-State
 
 if (-not $svcUser.usageLocation)
@@ -153,58 +146,110 @@ else
     Write-Ok "Assigned the Developer Plan to the service account"
 }
 
-if ($newAccount)
+# ---------------------------------------------------------------------------
+Write-Section "3. Service account can sign in without MFA"
+# ---------------------------------------------------------------------------
+# The hotfix pipeline signs in as the service account with just a password, and so
+# does this script. Anything that forces MFA on that account breaks both.
+$securityDefaults = Get-SecurityDefaultsEnabled
+
+$svcBapToken = $null
+$lastError = $null
+$attempts = if ($newAccount) { 8 } else { 1 }
+for ($i = 1; $i -le $attempts -and -not $svcBapToken; $i++)
 {
-    Write-Step "Waiting 30 seconds for the new account to reach Power Platform..."
-    Start-Sleep -Seconds 30
+    try { $svcBapToken = Get-PasswordToken 'https://service.powerapps.com/' $svcUpn $state.ServiceAccountPassword $tenantId -ClientId $script:AzureCliClientId }
+    catch
+    {
+        $lastError = Get-ErrorText $_
+        if ($lastError -match 'AADSTS500(76|79)|AADSTS50158|multi-factor|MFA') { break }
+        if ($i -lt $attempts) { Write-Step "  New account not ready to sign in yet - waiting 15 seconds..."; Start-Sleep -Seconds 15 }
+    }
+}
+
+if (-not $svcBapToken)
+{
+    if ($lastError -match 'AADSTS500(76|79)|AADSTS50158|multi-factor|MFA')
+    {
+        Write-Bad "The service account is being asked for MFA, so it can't sign in with just a password."
+        if ($securityDefaults) { Write-Hint "Your tenant has 'security defaults' turned on, which forces MFA." }
+        Write-Hint "Own workshop tenant: turn off security defaults (Entra admin center > Overview > Properties >"
+        Write-Hint "  Manage security defaults > Disabled). This video walks through it: $mfaVideo"
+        Write-Hint "Company tenant: ask IT to exclude $svcUpn from MFA with a Conditional Access policy."
+        Write-Hint "Then run this script again."
+    }
+    else
+    {
+        Write-Bad "The service account couldn't sign in: $lastError"
+        Write-Hint "Run this script again in a few minutes - new accounts can take a while to be ready."
+    }
+    exit 1
+}
+Write-Ok "Service account signs in with its password"
+# The Azure CLI sign-in usually isn't allowed to read the security defaults setting ($null),
+# so unless we know it's off, remind people - it can pass today and break in two weeks.
+if ($securityDefaults -ne $false)
+{
+    Write-Warn "Sign-in works today, but if MFA is still enforced on this account (for example by"
+    Write-Hint "'security defaults'), Microsoft starts demanding MFA setup after about 14 days and the"
+    Write-Hint "hotfix pipeline will fail. If you haven't yet, do Step 1 in this folder's README:"
+    Write-Hint "  own tenant: turn off security defaults ($mfaVideo)"
+    Write-Hint "  company tenant: ask IT to exclude $svcUpn from MFA"
 }
 
 # ---------------------------------------------------------------------------
-Write-Section "3. Hotfix environments (owned by the service account)"
+Write-Section "4. Hotfix environments (owned by the service account)"
 # ---------------------------------------------------------------------------
-# You can't see these through the normal list until you're added to them,
-# so use the admin view from PAC CLI.
-function Get-AdminEnvironment($name)
-{
-    $list = pac admin list --json 2>&1 | Out-String
-    try { return (ConvertFrom-Json $list | ForEach-Object { $_ } | Where-Object { $_.DisplayName -eq $name } | Select-Object -First 1) }
-    catch { return $null }
-}
-
-$tenantShort = Get-TenantShortName
+# List with your admin view; create as the service account so it owns them
+$svcEnvs = @(Get-MyEnvironments -Admin | Where-Object { $_.OwnerId -eq $svcUser.id })
 $hotfixEnvs = @()
 foreach ($suffix in $envSuffixes)
 {
     $name = "$prefix-$suffix"
-    $hf = Get-AdminEnvironment $name
-    if ($hf)
+    $existing = $svcEnvs | Where-Object { $_.DisplayName -eq $name } | Select-Object -First 1
+    $databaseRequested = $false
+    if ($existing)
     {
-        Write-Ok "$name already exists - reusing it"
+        if (-not $existing.HasDataverse -and $existing.Provisioning -eq 'Succeeded')
+        {
+            Write-Step "$name has no Dataverse database - adding one (usually 2-5 minutes)..."
+            Add-DataverseDatabase $existing.Id -Token $svcBapToken
+            $databaseRequested = $true
+        }
+        else { Write-Ok "$name already exists - reusing it" }
+        $envId = $existing.Id
     }
     else
     {
-        $envDomain = Get-EnvironmentDomain $tenantShort $prefix $suffix
-        Write-Step "Creating $name ($envDomain) for the service account - this usually takes 2-5 minutes..."
-        $out = pac admin create --name $name --type Developer --domain $envDomain --region $Region --user $svcUser.id 2>&1 | Out-String
-        if ($out -match 'Error:')
+        $owned = @($svcEnvs | Where-Object { $_.Sku -eq 'Developer' }).Count
+        if ($owned -ge $script:DeveloperEnvironmentLimit)
         {
-            Write-Bad "Couldn't create $name"
-            Write-Hint ($out.Trim())
+            Write-Bad "Can't create $name - the service account already owns $owned Developer environments (the limit)."
+            exit 1
+        }
+        Write-Step "Creating $name in $Region as the service account, then adding its database - usually 2-5 minutes..."
+        try
+        {
+            $envId = New-DeveloperEnvironment $name $Region -Token $svcBapToken
+            Add-DataverseDatabase $envId -Token $svcBapToken
+        }
+        catch
+        {
+            Write-Bad "Couldn't create $($name): $(Get-ErrorText $_)"
             exit 1
         }
         Write-Ok "Created $name"
-        Write-Step "Waiting 30 seconds for Dataverse to finish provisioning..."
-        Start-Sleep -Seconds 30
-        $hf = Get-AdminEnvironment $name
-        if (-not $hf) { Write-Bad "Created $name but can't find it yet. Run this script again in a few minutes."; exit 1 }
+        $databaseRequested = $true
     }
-    $hotfixEnvs += [PSCustomObject]@{ DisplayName = $hf.DisplayName; Id = $hf.EnvironmentId; Url = $hf.EnvironmentUrl }
+    $ready = Wait-EnvironmentReady $name -EnvironmentId $envId -DatabaseRequested:$databaseRequested -Admin
+    $hotfixEnvs += $ready
+    $svcEnvs = @(Get-MyEnvironments -Admin | Where-Object { $_.OwnerId -eq $svcUser.id })
 }
 $state.HotfixEnvironments = @($hotfixEnvs | ForEach-Object { [ordered]@{ Name = $_.DisplayName; Id = $_.Id; Url = $_.Url } })
 Save-State
 
 # ---------------------------------------------------------------------------
-Write-Section "4. You and your service principal as System Administrator"
+Write-Section "5. You and your service principal as System Administrator"
 # ---------------------------------------------------------------------------
 function Invoke-WithRetry($label, [scriptblock]$action)
 {
@@ -223,7 +268,10 @@ function Invoke-WithRetry($label, [scriptblock]$action)
 foreach ($e in $hotfixEnvs)
 {
     Write-Step "$($e.DisplayName)"
-    $ok = Invoke-WithRetry "Adding you" { Add-UserToDataverseEnvironment $e.Url $upn $svcUpn $state.ServiceAccountPassword $tenantId }
+    # The service account owns the environment, so act as it to let everyone else in
+    $svcDvToken = Get-PasswordToken $e.Url.TrimEnd('/') $svcUpn $state.ServiceAccountPassword $tenantId -ClientId $script:AzureCliClientId
+
+    $ok = Invoke-WithRetry "Adding you" { Add-EntraUserToDataverse $e.Url $e.Id $me.id $svcDvToken }
     if (-not $ok) { Write-Bad "Couldn't add you to $($e.DisplayName). Run this script again in a few minutes."; exit 1 }
 
     $ok = Invoke-WithRetry "Adding the service principal" { Add-SPNToDataverseEnvironment $e.Url $state.AppId $svcUpn $state.ServiceAccountPassword $tenantId | Out-Null }
@@ -232,64 +280,20 @@ foreach ($e in $hotfixEnvs)
 }
 
 # ---------------------------------------------------------------------------
-Write-Section "5. Azure DevOps service connections"
-# ---------------------------------------------------------------------------
-$orgUrl = "https://dev.azure.com/$($state.AdoOrganization)"
-$connectionProblems = 0
-try { $project = Invoke-Ado GET "$orgUrl/_apis/projects/$([uri]::EscapeDataString($state.AdoProject))?api-version=7.1" }
-catch { $project = $null }
-
-if (-not $project -or -not $state.ClientSecret)
-{
-    Write-Warn "Skipping service connections - the core Azure DevOps project or secret isn't available."
-    $connectionProblems++
-}
-else
-{
-    foreach ($e in $hotfixEnvs)
-    {
-        $connName = $e.DisplayName
-        $existing = Invoke-Ado GET "$orgUrl/$($project.id)/_apis/serviceendpoint/endpoints?endpointNames=$([uri]::EscapeDataString($connName))&api-version=7.1-preview.4"
-        if (@($existing.value).Count -gt 0) { Write-Ok "Service connection '$connName' already exists"; continue }
-        $body = @{
-            name          = $connName
-            type          = 'powerplatform-spn'
-            url           = $e.Url
-            description   = "Service principal $($state.AppName) -> $connName"
-            authorization = @{
-                scheme     = 'None'
-                parameters = @{ tenantId = $tenantId; applicationId = $state.AppId; clientSecret = $state.ClientSecret }
-            }
-            isShared      = $false
-            isReady       = $true
-            serviceEndpointProjectReferences = @(@{ projectReference = @{ id = $project.id; name = $project.name }; name = $connName })
-        }
-        try
-        {
-            $endpoint = Invoke-Ado POST "$orgUrl/_apis/serviceendpoint/endpoints?api-version=7.1-preview.4" $body
-            try { Invoke-Ado PATCH "$orgUrl/$($project.id)/_apis/pipelines/pipelinePermissions/endpoint/$($endpoint.id)?api-version=7.1-preview.1" @{ allPipelines = @{ authorized = $true } } | Out-Null } catch { }
-            Write-Ok "Created service connection '$connName'"
-        }
-        catch
-        {
-            $connectionProblems++
-            Write-Warn "Couldn't create service connection '$connName': $(Get-ErrorText $_)"
-        }
-    }
-}
-if ($connectionProblems -gt 0)
-{
-    Write-Hint "You can create them by hand: Project settings > Service connections > New > Power Platform."
-}
-
-# ---------------------------------------------------------------------------
-Write-Section "Done"
+Write-Section "Done - values for the hotfix lessons"
 # ---------------------------------------------------------------------------
 Save-State
 Write-Host ""
-Write-Host "  Hotfix environments:" -ForegroundColor Green
-foreach ($e in $hotfixEnvs) { Write-Host "    $($e.DisplayName)  $($e.Url)" }
-Write-Host "  Service account: $svcUpn" -ForegroundColor Green
+foreach ($e in $hotfixEnvs)
+{
+    Write-Host "  $($e.DisplayName)" -ForegroundColor Green
+    Write-Host "    BuildTools.EnvironmentUrl  $($e.Url)"
+    Write-Host "    EnvironmentID              $($e.Id)"
+}
 Write-Host ""
-Write-Host "  The service account password is saved in $($script:StateFile)." -ForegroundColor Yellow
-Write-Host "  Keep that file private." -ForegroundColor Yellow
+Write-Host "  Service account (for the username/password service connection):" -ForegroundColor Green
+Write-Host "    Username  $svcUpn"
+Write-Host "    Password  saved in my-alm-setup.json (ServiceAccountPassword)"
+Write-Host ""
+Write-Host "  Next: the hotfix lessons have you create the service connections and variable groups." -ForegroundColor Yellow
+Write-Host "  Keep my-alm-setup.json private - it holds the service account password and client secret." -ForegroundColor Yellow

@@ -62,16 +62,6 @@ if ($upn -match '#EXT#' -or $upn -match '@(outlook|hotmail|live|gmail|yahoo)\.')
         "Create a work account inside your tenant (README: 'Create your work account') and sign in with that, using -SwitchAccount."
 }
 
-if (Connect-WorkshopPac -TenantId $tenantId -UseDeviceCode:$UseDeviceCode)
-{
-    Add-Result 'Sign-in' 'OK' "Power Platform CLI is signed in to the same tenant"
-}
-else
-{
-    Add-Result 'Sign-in' 'FAIL' "Power Platform CLI is not signed in to tenant $tenantId." `
-        "Run: pac auth create --tenant $tenantId   (sign in with $upn)"
-}
-
 $me = Invoke-Graph GET "/me?`$select=id,displayName,userPrincipalName"
 $activeRoles = @(Get-MyActiveRoleIds)
 $eligibleRoles = Get-MyEligibleRoleIds $me.id
@@ -140,7 +130,16 @@ $myDeveloperEnvs = @($environments | Where-Object { $_.Sku -eq 'Developer' -and 
 $needed = $envNames.Count - $alreadyThere.Count
 $free = $script:DeveloperEnvironmentLimit - $myDeveloperEnvs.Count
 
-foreach ($e in $alreadyThere) { Write-Ok "$($e.DisplayName) already exists - setup will reuse it" }
+# Developer environments without a database (like the one the Developer Plan sign-up creates)
+# get converted by setup when slots are short, so they count as available
+$spares = @($myDeveloperEnvs | Where-Object { -not $_.HasDataverse -and $envNames -notcontains $_.DisplayName -and $_.Provisioning -eq 'Succeeded' })
+$convertCount = [Math]::Min($spares.Count, [Math]::Max($needed - [Math]::Max($free,0), 0))
+
+foreach ($e in $alreadyThere)
+{
+    if ($e.HasDataverse -or $e.Provisioning -ne 'Succeeded') { Write-Ok "$($e.DisplayName) already exists - setup will reuse it" }
+    else { Write-Ok "$($e.DisplayName) exists without a database - setup will add one" }
+}
 
 if ($needed -eq 0)
 {
@@ -150,11 +149,16 @@ elseif ($free -ge $needed)
 {
     Add-Result 'Power Platform' 'OK' "You have room for $needed more Developer environment(s) ($($myDeveloperEnvs.Count) of $($script:DeveloperEnvironmentLimit) used)"
 }
+elseif (($free + $convertCount) -ge $needed)
+{
+    $names = ($spares | Select-Object -First $convertCount | ForEach-Object { "'$($_.DisplayName)'" }) -join ', '
+    Add-Result 'Power Platform' 'OK' "Setup will convert $names (no database yet) into a workshop environment and create the rest"
+}
 else
 {
     $list = ($myDeveloperEnvs | ForEach-Object { $_.DisplayName }) -join ', '
-    Add-Result 'Power Platform' 'FAIL' "You need $needed more Developer environment(s) but only have $([Math]::Max($free,0)) free (limit is $($script:DeveloperEnvironmentLimit) per person)." `
-        "Delete $($needed - [Math]::Max($free,0)) you no longer need at https://admin.powerplatform.microsoft.com. Yours: $list"
+    $fix = "Delete $($needed - [Math]::Max($free,0) - $convertCount) you no longer need at https://admin.powerplatform.microsoft.com. Yours: $list"
+    Add-Result 'Power Platform' 'FAIL' "You need $needed more Developer environment(s) but only have $([Math]::Max($free,0)) free (limit is $($script:DeveloperEnvironmentLimit) per person)." $fix
 }
 
 $isPowerPlatformAdmin = $isGlobalAdmin -or (Test-HasRole @($R.PowerPlatformAdministrator))
@@ -230,11 +234,6 @@ else
     Add-Result 'Hotfix' 'WARN' "You can't create user accounts, which the hotfix course needs." `
         $null "The 'User Administrator' role in Entra ID (hotfix course only)" -HotfixOnly
 }
-if (-not $isPowerPlatformAdmin)
-{
-    Add-Result 'Hotfix' 'WARN' "You can't create environments owned by another account, which the hotfix course needs." `
-        $null "The 'Power Platform Administrator' role (hotfix course only)" -HotfixOnly
-}
 try
 {
     $skus = Invoke-Graph GET "/subscribedSkus?`$select=skuPartNumber,prepaidUnits,consumedUnits"
@@ -250,6 +249,9 @@ try
     }
 }
 catch { Add-Result 'Hotfix' 'WARN' "Couldn't read your tenant's licenses." -HotfixOnly }
+# Can't be checked from here (the Azure CLI sign-in isn't allowed to read MFA policies)
+Write-Hint "Reminder: the hotfix service account must not require MFA. See 'Step 1' in the"
+Write-Hint "'Part 2 - Hotfix (For later)' README before running the hotfix setup."
 
 # ---------------------------------------------------------------------------
 Write-Section "Summary"
